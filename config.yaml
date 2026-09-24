@@ -1,0 +1,77 @@
+access_log:
+    enabled: false
+    keep_files: 14
+    path: ./logs/access.log
+    rotate_size_mb: 100
+geoip:
+    db_path: ./data/dbip-country.mmdb
+license:
+    api_url: ""
+    state_dir: ./data/license
+log:
+    format: json
+    level: info
+server:
+    admin:
+        audit_retention_days: 0
+        host: 127.0.0.1
+        port: 8081
+        secure_cookies: false
+        setup_completed: true
+        username: admin
+    admin_port: 9090
+    enable_http3: false
+    idle_timeout: 120s
+    max_header_bytes: 1048576
+    port: 8080
+    read_header_timeout: 2s
+    read_timeout: 30s
+    shutdown_timeout: 30s
+    smtp:
+        from: no-reply@aegis.local
+        host: localhost
+        password: ""
+        port: 1025
+        username: ""
+    tls:
+        auto: false
+        cache_dir: data/tls/acme
+        cert_dir: data/tls/certs
+        cert_file: ""
+        domains: []
+        email: ""
+        enabled: false
+        key_file: ""
+    write_timeout: 30s
+storage:
+    analytics:
+        conn_max_lifetime: 1h0m0s
+        database: aegis
+        driver: clickhouse
+        enabled: true
+        host: localhost
+        max_idle_conns: 10
+        max_open_conns: 20
+        mode: optional
+        password_secret_ref: env:AEGIS_ANALYTICS_DB_PASSWORD
+        port: 9000
+        secure: false
+        username: default
+    control:
+        database: aegis
+        driver: postgresql
+        enabled: true
+        host: 127.0.0.1
+        password_secret_ref: env:AEGIS_CONTROL_DB_PASSWORD
+        port: 5433
+        ssl_mode: disable
+        username: aegis
+telemetry:
+    prometheus_enabled: false
+    prometheus_path: /metrics
+    prometheus_token: ""
+    request_logging: true
+    retention_days: 30
+    snapshot_interval: 60
+updater:
+    socket_path: /run/aegis/updater.sock

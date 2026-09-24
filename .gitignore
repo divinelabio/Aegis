@@ -1,0 +1,77 @@
+node_modules/
+
+# Local agent/editor state
+.agent/
+.agents/
+.codebase-memory/
+.codex
+skills-lock.json
+.vscode/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Local build and runtime outputs
+/aegis
+/aegis-server
+/aegis-updater
+/aegisctl
+*.exe
+bin/
+.tmp/
+/dist/
+cmd/*/rsrc_windows_*.syso
+.codex-go-cache-*/
+.codex-build/
+cmd/aegis-server/aegis-server
+logs/
+data/*.jsonl
+data/*.gz
+data/alerts-state.json
+data/license/
+data/pgdata/
+data/tls/certs/
+data/tls/acme/
+/aegis.db
+*.log
+*.out
+# Coverage profiles (including accidental PowerShell literal filenames)
+/$cover
+/$auditCover
+*.coverprofile
+coverage/
+test-results/
+playwright-report/
+.nyc_output/
+.cache/
+.parcel-cache/
+.vite/
+
+# Local browser/debug captures
+.playwright-mcp/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+!docs/images/**
+!web/admin/images/**
+
+# One-off cleanup/migration scripts and captured command output
+fix_*.js
+fix_*.py
+strip_glows.py
+test_output.txt
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

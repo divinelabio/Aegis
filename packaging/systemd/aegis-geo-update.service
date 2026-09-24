@@ -1,0 +1,9 @@
+[Unit]
+Description=Update the Aegis GeoIP database
+
+[Service]
+Type=oneshot
+User=aegis
+Group=aegis
+WorkingDirectory=/opt/aegis
+ExecStart=/opt/aegis/aegis-updater geo --config /etc/aegis/config.yaml

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aegis | Sign In</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
+    <script type="module" src="/dist/js/auth/theme-init.js?v=2"></script>
+    <link rel="stylesheet" href="/css/variables.css?v=63">
+    <link rel="stylesheet" href="/css/feedback.css?v=22">
+    <link rel="stylesheet" href="/css/auth.css?v=5">
+    <link rel="stylesheet" href="/css/theme-dark.css?v=19">
+    <link rel="stylesheet" href="/css/geometry.css?v=1">
+    <link rel="stylesheet" href="/css/controls.css?v=2">
+</head>
+
+<body>
+
+    <div class="auth-shell">
+        <!-- Left Form Panel -->
+        <div class="auth-panel auth-panel-form">
+            <div class="auth-form-container">
+                <h1 class="stagger-1">Welcome Back</h1>
+                <p class="subtitle stagger-2">Sign in to Aegis</p>
+
+                <!-- Inline Error Container -->
+                <div id="error-alert" class="alert-inline stagger-3" role="alert" aria-live="assertive">
+                    <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <span id="error-msg">Invalid credentials</span>
+                </div>
+
+                <form id="loginForm" novalidate class="stagger-4">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                            <input type="text" id="username" placeholder="Enter your username" required autofocus>
+                        </div>
+                    </div>
+
+                    <div class="form-group tight">
+                        <label>Password</label>
+                        <div class="input-wrapper input-with-toggle">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            </svg>
+                            <input type="password" id="password" placeholder="••••••••" required>
+                            <!-- Password Toggle -->
+                            <svg id="togglePassword" class="password-toggle" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2" role="button" aria-label="Show password" tabindex="0">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <!-- MFA Input (Hidden initially) -->
+                    <div id="mfa-group" class="form-group hidden">
+                        <label>Authenticator Code</label>
+                        <div class="input-wrapper">
+                            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            </svg>
+                            <input type="text" id="mfaCode" placeholder="123 456" maxlength="6" pattern="[0-9]*"
+                                autocomplete="one-time-code">
+                        </div>
+                    </div>
+
+                    <div class="remember-row">
+                        <label class="remember-me">
+                            <input type="checkbox" id="rememberMe">
+                            Remember me
+                        </label>
+                        <a href="/admin/request-reset" class="forgot-pass">Forgot password?</a>
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="btn-glow">Sign In</button>
+                </form>
+
+                <div class="footer stagger-5">
+                    &copy; 2026 Aegis Security. All rights reserved.
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Visual Panel -->
+        <div class="auth-panel auth-panel-visual">
+            <div class="auth-visual-grid"></div>
+            <div class="auth-visual-copy">
+                <div class="auth-brand-lockup">
+                    <div class="auth-logo-small" aria-label="Aegis Logo"></div>
+                </div>
+                <div class="auth-visual-kicker">Edge Security Platform</div>
+                <h2>Web Application<br>Firewall</h2>
+                <p>Edge protection, traffic analysis, and threat mitigation for your infrastructure.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <!-- Managed by toast.js -->
+
+    <script type="module" src="/dist/js/auth/login.js?v=2"></script>
+</body>
+
+</html>

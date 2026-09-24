@@ -1,0 +1,18 @@
+[Unit]
+Description=Aegis Maintenance and In-Place Upgrade Daemon
+Documentation=https://github.com/divinelab-io/aegis
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/aegis
+ExecStart=/opt/aegis/aegis-updater serve --config /etc/aegis/config.yaml
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=aegis
+RuntimeDirectoryMode=0775
+
+[Install]
+WantedBy=multi-user.target

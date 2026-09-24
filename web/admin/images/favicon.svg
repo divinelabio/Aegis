@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" stroke-linecap="round" stroke-linejoin="round">
+  <style>
+    .chevron { stroke: #101214; }
+    @media (prefers-color-scheme: dark) {
+      .chevron { stroke: #f8fafc; }
+    }
+  </style>
+  <polyline points="25,80 50,20 75,80" fill="none" class="chevron" stroke-width="16" />
+  <line x1="38" y1="60" x2="62" y2="60" stroke="#f97316" stroke-width="16" />
+</svg>

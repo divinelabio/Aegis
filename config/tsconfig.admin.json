@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "lib": ["DOM", "DOM.Iterable", "ES2020"],
+    "allowJs": false,
+    "checkJs": false,
+    "strict": true,
+    "noImplicitOverride": true,
+    "useUnknownInCatchVariables": true,
+    "noEmitOnError": false,
+    "skipLibCheck": true,
+    "rootDir": "../web/admin/src",
+    "outDir": "../web/admin/dist/js",
+    "removeComments": false
+  },
+  "include": [
+    "../web/admin/src/**/*.ts",
+    "../web/admin/src/**/*.d.ts"
+  ]
+}

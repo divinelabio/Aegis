@@ -1,0 +1,75 @@
+enabled: false
+protectionlevel: 0
+blacklist:
+    enabled: false
+    ips: []
+    cidrs: []
+    entries: []
+    autoexpire: 0s
+geo:
+    enabled: false
+    allowcountries: []
+    blockcountries:
+        - US
+    groups: []
+    cachettl: 24h
+    exceptions: []
+    mode: blocklist
+    dbpath: ./data/dbip-country.mmdb
+    autoupdate: false
+    updateinterval: 168h
+    updateurl: https://download.db-ip.com/free/dbip-country-lite-{YYYY}-{MM}.mmdb.gz
+    countries:
+        - US
+    regions: []
+reputation:
+    enabled: false
+    dnsblservers: []
+    blocktor: false
+    blockdatacenter: false
+    feeds: []
+    cachettl: ""
+    sensitivity: 85
+    action: block
+    blockedips: []
+    allowedips: []
+    cti:
+        enabled: true
+        url: "http://localhost:8090"
+        apikey: ""
+        minscore: 60
+ddos:
+    enabled: false
+    maxrps: 110
+    maxconnections: 350
+    burstmultiplier: 2.1
+    panicthreshold: 0
+    panicenabled: false
+    action: ""
+    autoban: false
+    banduration: 0
+    exceptions: []
+ratelimit:
+    enabled: false
+    defaultrate: 0
+    defaultburst: 10
+    window: 1s
+    algorithm: fixed_window
+    keyby: token
+    action: challenge
+    bypassstatic: false
+    bypassknownbots: false
+    cookiename: ""
+    headername: ""
+    staticextensions: []
+    pathoverrides: []
+connstats:
+    enabled: false
+challenge:
+    enabled: false
+    threshold: 50
+    mode: js
+priority:
+    enabled: false
+    vipips:
+        - 1.1.1.1

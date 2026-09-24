@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aegis | Set New Password</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
+    <script type="module" src="/dist/js/auth/theme-init.js?v=2"></script>
+    <link rel="stylesheet" href="/css/variables.css?v=63">
+    <link rel="stylesheet" href="/css/feedback.css?v=22">
+    <link rel="stylesheet" href="/css/auth.css?v=4">
+    <link rel="stylesheet" href="/css/theme-dark.css?v=19">
+    <link rel="stylesheet" href="/css/geometry.css?v=1">
+    <link rel="stylesheet" href="/css/controls.css?v=2">
+    
+</head>
+
+<body>
+    <div class="card">
+        <img src="/images/logo.svg" alt="Aegis" class="logo">
+        <h1>New Password</h1>
+        <p class="subtitle">Please enter a new password for your account.</p>
+
+        <div id="alert" class="alert"></div>
+
+        <form id="resetForm">
+            <div class="form-group">
+                <label>New Password</label>
+                <input type="password" id="password" required autofocus minlength="8">
+            </div>
+            <div class="form-group">
+                <label>Confirm Password</label>
+                <input type="password" id="confirmPassword" required minlength="8">
+            </div>
+            <button type="submit" id="submitBtn">Set Password</button>
+        </form>
+    </div>
+
+    <script type="module" src="/dist/js/auth/reset-confirm.js?v=1"></script>
+</body>
+
+</html>
