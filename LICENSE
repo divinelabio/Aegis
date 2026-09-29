@@ -1,0 +1,54 @@
+Business Source License 1.1
+
+Parameters
+
+Licensor:
+    Divine Lab
+
+Licensed Work:
+    Aegis, including all source code, binaries, and documentation in this repository.
+
+Additional Use Grant:
+    You may make use of the Licensed Work to protect your own internal applications, APIs,
+    and services, including in production environments. You may not offer the Licensed Work,
+    or any portion thereof, as a commercial managed service, cloud-hosted security service,
+    or Web Application Firewall service to third parties in competition with the Licensor,
+    without obtaining a commercial license from the Licensor.
+
+Change Date:
+    2030-01-01
+
+Change License:
+    Apache License, Version 2.0
+
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative works, redistribute,
+and make non-production use of the Licensed Work. The Licensor may make an Additional Use Grant,
+above, permitting limited production use.
+
+Effective on the Change Date, or the fourth anniversary of the first publicly available distribution
+of a specific version of the Licensed Work under this License, whichever comes first, the Licensor
+hereby grants you rights under the terms of the Change License, and the terms of this License are
+terminated for that version.
+
+You may make larger works that combine the Licensed Work with other software under terms of your
+choice, so long as the Licensed Work itself remains subject to this License or the Change License.
+Any derivative works, modifications, and distributions of the Licensed Work must be subject to this
+License (or, on or after the Change Date, the Change License), and you must include a copy of this
+License with every copy of the Licensed Work or derivative work you distribute.
+
+You may not use the Licensed Work to develop any software that is distributed or made available to
+third parties in violation of the Additional Use Grant.
+
+If you violate the terms of this License, your rights under this License terminate automatically.
+
+To the extent permitted by applicable law, the Licensed Work is provided on an "AS IS" basis.
+The Licensor makes no warranties, express or implied, including without limitation warranties
+of merchantability, fitness for a particular purpose, and non-infringement. In no event shall
+the Licensor be liable for any direct, indirect, incidental, special, exemplary, or consequential
+damages (including, but not limited to, procurement of substitute goods or services; loss of use,
+data, or profits; or business interruption) however caused and on any theory of liability,
+whether in contract, strict liability, or tort (including negligence or otherwise) arising in
+any way out of the use of the Licensed Work, even if advised of the possibility of such damage.

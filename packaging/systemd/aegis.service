@@ -1,0 +1,31 @@
+[Unit]
+Description=Aegis Web Application Firewall & Reverse Proxy
+Documentation=https://github.com/divinelab-io/aegis
+After=network.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aegis
+Group=aegis
+WorkingDirectory=/opt/aegis
+EnvironmentFile=-/etc/aegis/aegis.env
+EnvironmentFile=-/etc/aegis/release.env
+ExecStart=/opt/aegis/current/aegis --config /etc/aegis/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3s
+LimitNOFILE=65535
+TimeoutStopSec=30s
+
+# Allow non-root process to bind low ports (80, 443)
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+RuntimeDirectory=aegis
+RuntimeDirectoryMode=0775
+
+[Install]
+WantedBy=multi-user.target

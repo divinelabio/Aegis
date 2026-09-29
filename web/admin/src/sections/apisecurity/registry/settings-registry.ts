@@ -1,0 +1,131 @@
+import { getAPISecurityFunctionSettingsMirrorPath } from '../save-payload.js';
+import type {
+    APISecurityProfileKey,
+    APISecuritySettingCategory,
+    APISecuritySettingControlType,
+    APISecuritySettingDefinition
+} from '../types.js';
+
+type RegistryItem = Omit<APISecuritySettingDefinition, 'id' | 'functionSettingsMirrorPath' | 'saveBehavior'> & {
+    id?: string;
+    mirror?: boolean;
+};
+
+function setting(item: RegistryItem): APISecuritySettingDefinition {
+    const id = item.id || item.configPath.replace(/\./g, '-');
+    const functionSettingsMirrorPath = item.mirror === false ? undefined : getAPISecurityFunctionSettingsMirrorPath(item.configPath);
+    return {
+        ...item,
+        id,
+        functionSettingsMirrorPath,
+        saveBehavior: functionSettingsMirrorPath ? 'settings-and-function-mirror' : 'settings'
+    };
+}
+
+function item(
+    category: APISecuritySettingCategory,
+    configPath: string,
+    label: string,
+    controlType: APISecuritySettingControlType,
+    description: string,
+    defaultValue?: unknown,
+    profileOwnership?: APISecurityProfileKey,
+    riskLevel: APISecuritySettingDefinition['riskLevel'] = 'low'
+): RegistryItem {
+    return { category, configPath, label, controlType, description, defaultValue, profileOwnership, riskLevel };
+}
+
+export const API_SECURITY_SETTINGS_REGISTRY: APISecuritySettingDefinition[] = [
+    setting(item('discovery', 'discovery.enabled', 'Endpoint discovery', 'toggle', 'Collect API endpoints from observed traffic.', true)),
+    setting(item('discovery', 'discovery.paths', 'API path patterns', 'path-list', 'Paths included in API discovery.', ['/api/*', '/v1/*', '/v2/*', '/graphql'])),
+    setting(item('discovery', 'discovery.detect_shadow_apis', 'Shadow API detection', 'toggle', 'Flag active APIs without contract coverage.', true)),
+    setting(item('discovery', 'discovery.detect_zombie_apis', 'Zombie API detection', 'toggle', 'Flag stale or inactive APIs.', true)),
+    setting(item('discovery', 'discovery.zombie_inactivity_days', 'Zombie inactivity window', 'number', 'Days without traffic before an API is considered stale.', 30)),
+
+    setting(item('schemas', 'validation.enabled', 'Contract enforcement', 'toggle', 'Enable schema-backed request validation.', true, 'contract')),
+    setting(item('schemas', 'validation.mode', 'Contract mode', 'segmented', 'Monitor or block schema validation failures.', 'block', 'contract', 'high')),
+    setting(item('schemas', 'validation.block_unknown_endpoints', 'Unknown endpoint handling', 'toggle', 'Block requests to endpoints without a known contract.', false, 'contract', 'high')),
+    setting(item('schemas', 'validation.block_invalid_methods', 'Invalid method handling', 'toggle', 'Block methods missing from an attached schema.', true, 'contract')),
+    setting(item('schemas', 'validation.block_invalid_content_types', 'Invalid content type handling', 'toggle', 'Block unsupported content types on schema-backed APIs.', true, 'contract')),
+    setting(item('schemas', 'validation.validate_responses', 'Response contract validation', 'toggle', 'Validate complete JSON responses against attached OpenAPI response contracts.', false, 'contract', 'high')),
+
+    setting(item('identity_auth_detection', 'auth_tokens.enabled', 'Token validation', 'toggle', 'Enable JWT and token context validation.', true, 'authorization')),
+    setting(item('identity_auth_detection', 'auth_tokens.mode', 'Token validation mode', 'segmented', 'Monitor or block token validation findings.', 'detect', 'authorization', 'high')),
+    setting(item('identity_auth_detection', 'auth_tokens.protected_paths', 'Protected API paths', 'endpoint-picker', 'APIs that should require or validate tokens.', [], 'authorization')),
+    setting(item('identity_auth_detection', 'auth_tokens.excluded_paths', 'Token exclusions', 'endpoint-picker', 'APIs excluded from token validation.', [], 'authorization')),
+    setting(item('identity_auth_detection', 'auth_tokens.required_claims', 'Required claims', 'chip-list', 'Claims expected on protected token flows.', ['sub'], 'authorization')),
+    setting(item('identity_auth_detection', 'auth_tokens.require_signature', 'Require token signature', 'toggle', 'Require a verifiable token signature.', false, 'authorization', 'high')),
+    setting(item('identity_auth_detection', 'auth_tokens.issuers', 'Trusted issuers', 'rule-table', 'Issuer, audience, algorithm, and JWKS rows.', [], 'authorization')),
+
+    setting(item('runtime', 'injection.enabled', 'Injection protection', 'toggle', 'Enable injection attack detection.', true, 'runtime')),
+    setting(item('runtime', 'injection.mode', 'Injection mode', 'segmented', 'Monitor or block injection findings.', 'block', 'runtime', 'high')),
+    setting(item('runtime', 'injection.sqli', 'SQL injection', 'toggle', 'Detect SQL injection probes.', true, 'runtime')),
+    setting(item('runtime', 'injection.nosqli', 'NoSQL injection', 'toggle', 'Detect NoSQL selector abuse.', true, 'runtime')),
+    setting(item('runtime', 'injection.cmdi', 'Command injection', 'toggle', 'Detect command execution attempts.', true, 'runtime')),
+    setting(item('runtime', 'injection.xss', 'XSS detection', 'toggle', 'Detect script and markup injection attempts.', true, 'runtime')),
+    setting(item('runtime', 'injection.sensitivity', 'Injection sensitivity', 'select', 'Detection sensitivity for injection patterns.', 'medium', 'runtime')),
+    setting(item('runtime', 'ssrf.enabled', 'SSRF protection', 'toggle', 'Enable server-side request forgery detection.', true, 'runtime')),
+    setting(item('runtime', 'ssrf.mode', 'SSRF mode', 'segmented', 'Monitor or block SSRF findings.', 'detect', 'runtime', 'high')),
+    setting(item('runtime', 'ssrf.block_private_networks', 'Private network targets', 'toggle', 'Treat private/internal target access as suspicious.', true, 'runtime')),
+    setting(item('runtime', 'ssrf.block_cloud_metadata', 'Cloud metadata targets', 'toggle', 'Treat metadata service access as suspicious.', true, 'runtime')),
+    setting(item('runtime', 'payload_abuse.enabled', 'Payload abuse protection', 'toggle', 'Enable large or abusive payload detection.', true, 'runtime')),
+    setting(item('runtime', 'payload_abuse.mode', 'Payload abuse mode', 'segmented', 'Monitor or block abusive payload findings.', 'detect', 'runtime', 'high')),
+    setting(item('runtime', 'payload_abuse.sensitivity', 'Payload sensitivity', 'select', 'Detection sensitivity for abusive payloads.', 'balanced', 'runtime')),
+
+    setting(item('authorization', 'bola.enabled', 'BOLA protection', 'toggle', 'Enable object-level authorization checks.', true, 'authorization')),
+    setting(item('authorization', 'bola.mode', 'BOLA mode', 'segmented', 'Monitor or block BOLA findings.', 'detect', 'authorization', 'high')),
+    setting(item('authorization', 'bola.enable_ownership', 'Ownership enforcement', 'toggle', 'Use ownership context for object access checks.', false, 'authorization')),
+    setting(item('authorization', 'bola.enable_tenant', 'Tenant isolation', 'toggle', 'Use tenant context for object access checks.', false, 'authorization')),
+    setting(item('authorization', 'bola.enable_idor', 'IDOR detection', 'toggle', 'Detect object enumeration and IDOR behavior.', true, 'authorization')),
+    setting(item('authorization', 'bola.strict_mode', 'Strict tenant mode', 'toggle', 'Apply stricter object and tenant checks.', false, 'authorization', 'medium')),
+    setting(item('authorization', 'bola.isolated_paths', 'Isolated object paths', 'endpoint-picker', 'Paths with a {tenant_id} capture that need tenant isolation checks.', [], 'authorization')),
+    setting(item('authorization', 'bola.ownership_rules', 'Ownership rules', 'rule-table', 'Rules mapping resources to owner context.', [], 'authorization')),
+    setting(item('authorization', 'bfla.enabled', 'BFLA protection', 'toggle', 'Enable function-level authorization checks.', true, 'authorization')),
+    setting(item('authorization', 'bfla.mode', 'BFLA mode', 'segmented', 'Monitor or block BFLA findings.', 'detect', 'authorization', 'high')),
+    setting(item('authorization', 'bfla.rules', 'BFLA rules', 'rule-table', 'Path, method, role, and claim authorization rules.', [], 'authorization')),
+    setting(item('authorization', 'mass_assignment.enabled', 'Mass assignment protection', 'toggle', 'Enable protected-field abuse detection.', true, 'authorization')),
+    setting(item('authorization', 'mass_assignment.mode', 'Mass assignment mode', 'segmented', 'Monitor or block mass-assignment findings.', 'detect', 'authorization', 'high')),
+    setting(item('authorization', 'mass_assignment.protected_fields', 'Protected fields', 'chip-list', 'Fields that should not be client-controlled.', [], 'authorization')),
+    setting(item('authorization', 'mass_assignment.path_rules', 'Mass assignment path rules', 'rule-table', 'Path-specific protected-field rules.', [], 'authorization')),
+
+    setting(item('graphql', 'graphql.enabled', 'GraphQL protection', 'toggle', 'Enable GraphQL-specific protections.', true, 'graphql')),
+    setting(item('graphql', 'graphql.mode', 'GraphQL mode', 'segmented', 'Monitor or block GraphQL findings.', 'detect', 'graphql', 'high')),
+    setting(item('graphql', 'graphql.paths', 'GraphQL endpoints', 'endpoint-picker', 'Paths protected as GraphQL APIs.', ['/graphql'], 'graphql')),
+    setting(item('graphql', 'graphql.max_depth', 'Maximum query depth', 'number', 'Allowed GraphQL query nesting depth.', 15, 'graphql')),
+    setting(item('graphql', 'graphql.max_aliases', 'Maximum aliases', 'number', 'Allowed GraphQL alias count.', 25, 'graphql')),
+    setting(item('graphql', 'graphql.max_batch_size', 'Maximum batch size', 'number', 'Allowed GraphQL batch size.', 5, 'graphql')),
+    setting(item('graphql', 'graphql.max_complexity', 'Maximum complexity', 'number', 'Allowed GraphQL complexity budget.', 500, 'graphql')),
+    setting(item('graphql', 'graphql.block_introspection', 'Introspection policy', 'toggle', 'Block GraphQL introspection when enabled.', true, 'graphql')),
+
+    setting(item('abuse', 'automation_abuse.enabled', 'Abuse protection', 'toggle', 'Enable automation and abuse detection.', true, 'automation')),
+    setting(item('abuse', 'automation_abuse.mode', 'Abuse mode', 'segmented', 'Monitor or block automation findings.', 'detect', 'automation', 'high')),
+    setting(item('abuse', 'automation_abuse.sensitivity', 'Abuse sensitivity', 'select', 'Detection sensitivity for automation behavior.', 'balanced', 'automation')),
+    setting(item('abuse', 'automation_abuse.enable_credential_stuffing', 'Credential stuffing', 'toggle', 'Detect repeated credential attempts.', true, 'automation')),
+    setting(item('abuse', 'automation_abuse.enable_otp_bruteforce', 'OTP brute force', 'toggle', 'Detect repeated OTP attempts.', true, 'automation')),
+    setting(item('abuse', 'automation_abuse.enable_forced_browsing', 'Forced browsing', 'toggle', 'Detect path probing and forced browsing.', true, 'automation')),
+    setting(item('abuse', 'automation_abuse.enable_user_enumeration', 'User enumeration', 'toggle', 'Detect user or account enumeration.', true, 'automation')),
+    setting(item('abuse', 'automation_abuse.enable_object_enumeration', 'Object enumeration', 'toggle', 'Detect object ID enumeration.', true, 'automation')),
+    setting(item('abuse', 'automation_abuse.enable_scraping', 'Scraping detection', 'toggle', 'Detect scraping and expensive query abuse.', true, 'automation')),
+    setting(item('abuse', 'automation_abuse.login_paths', 'Login paths', 'endpoint-picker', 'Paths treated as login surfaces.', [], 'automation')),
+    setting(item('abuse', 'automation_abuse.otp_paths', 'OTP paths', 'endpoint-picker', 'Paths treated as OTP surfaces.', [], 'automation')),
+    setting(item('abuse', 'automation_abuse.monitored_paths', 'Monitored paths', 'endpoint-picker', 'Paths watched for automation abuse.', [], 'automation')),
+    setting(item('abuse', 'automation_abuse.identifier_fields', 'Identifier fields', 'chip-list', 'Fields used to identify principals or targets.', [], 'automation')),
+
+    setting(item('data_exposure', 'data_exposure.enabled', 'Data exposure protection', 'toggle', 'Enable sensitive-data exposure detection.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.mode', 'Data exposure mode', 'segmented', 'Monitor or block data exposure findings.', 'detect', 'data', 'high')),
+    setting(item('data_exposure', 'data_exposure.sensitivity', 'Data sensitivity', 'select', 'Detection sensitivity for exposed data.', 'balanced', 'data')),
+    setting(item('data_exposure', 'data_exposure.inspect_requests', 'Inspect requests', 'toggle', 'Inspect request content for sensitive data.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.inspect_responses', 'Inspect responses', 'toggle', 'Inspect response content for sensitive data.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.response_handling', 'Response handling', 'segmented', 'How to handle response exposure findings.', 'block', 'data', 'high')),
+    setting(item('data_exposure', 'data_exposure.detect_secrets', 'Secret detection', 'toggle', 'Detect exposed secrets.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.detect_tokens', 'Token detection', 'toggle', 'Detect exposed tokens.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.detect_payment_data', 'Payment data detection', 'toggle', 'Detect exposed payment data.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.detect_pii', 'PII detection', 'toggle', 'Detect exposed personal data.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.detect_debug_data', 'Debug data detection', 'toggle', 'Detect exposed debug data.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.detect_internal_data', 'Internal data detection', 'toggle', 'Detect exposed internal data.', true, 'data')),
+    setting(item('data_exposure', 'data_exposure.excluded_paths', 'Data exposure exclusions', 'endpoint-picker', 'APIs excluded from data exposure inspection.', [], 'data'))
+];
+
+export function getAPISecuritySettingsByCategory(category: APISecuritySettingCategory): APISecuritySettingDefinition[] {
+    return API_SECURITY_SETTINGS_REGISTRY.filter(settingDefinition => settingDefinition.category === category);
+}

@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEGIS | Admin Console</title>
+    <base href="/">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+
+    <script>
+        (() => {
+            try {
+                const storedTheme = window.localStorage.getItem('aegis-admin-theme');
+                document.documentElement.dataset.theme = storedTheme === 'light' ? 'light' : 'dark';
+            } catch (_) {
+                document.documentElement.dataset.theme = 'dark';
+            }
+        })();
+    </script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/css/variables.css?v=77">
+    <link rel="stylesheet" href="/css/feedback.css?v=14">
+    <link rel="stylesheet" href="/css/layout.css?v=86">
+    <link rel="stylesheet" href="/css/components.css?v=106">
+    <link rel="stylesheet" href="/css/console.css?v=77">
+    <link rel="stylesheet" href="/css/section-config.css?v=309">
+    <link rel="stylesheet" href="/css/theme-dark.css?v=14">
+    <link rel="stylesheet" href="/css/geometry.css?v=14">
+    <link rel="stylesheet" href="/css/controls.css?v=27">
+    <link rel="stylesheet" href="/css/setup-wizard.css?v=11">
+
+    <!-- Chart.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+
+<body>
+
+    <!-- Global Loading Indicator -->
+    <div id="global-loader" class="global-loader">
+        <div class="loader-spinner"></div>
+        <span class="loader-text">Loading...</span>
+    </div>
+
+    <div class="app-shell hidden" id="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-logo-img" aria-label="Aegis Logo"></div>
+            </div>
+
+            <!-- Quick Search -->
+            <div class="sidebar-search-box">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="sidebar-quick-search" class="sidebar-search-input" placeholder="Quick search..." autocomplete="off" aria-label="Quick search navigation" />
+                <button type="button" id="sidebar-search-clear" class="sidebar-search-clear hidden" aria-label="Clear search">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <nav class="nav-menu">
+                <!-- CATEGORY: OVERVIEW -->
+                <div class="nav-category-label">Overview</div>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="dashboard" data-dashboard-tab="security" data-permission="waf:read">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        <path d="M9 12l2 2 4-4"/>
+                    </svg>
+                    Security Events
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="security_analytics" data-permission="traffic:read" data-features="analytics.basic">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 3v18h18" />
+                        <path d="M18 17V9" />
+                        <path d="M13 17V5" />
+                        <path d="M8 17v-3" />
+                    </svg>
+                    Traffic Events
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="logs" data-permission="waf:read">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    Threat Logs
+                </a>
+
+                <!-- CATEGORY: CONFIGURATION -->
+                <div class="nav-category-label" data-permission="waf:read">Configuration</div>
+
+                <!-- Application Firewall Dropdown -->
+                <div class="nav-domain-group" data-domain="waf" data-permission="waf:read">
+                    <button type="button" class="nav-domain-header" aria-expanded="false">
+                        <span class="nav-domain-title">
+                            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                            Application Firewall
+                        </span>
+                        <svg class="nav-domain-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                    <div class="nav-domain-children">
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="waf_config" data-permission="waf:read">Overview</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="waf_managed" data-permission="waf:read">Managed Rulesets</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="waf_custom" data-permission="waf:read">Custom Rules</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="waf_exclusions" data-permission="waf:read">Exclusions</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="dlp_config" data-permission="waf:read" data-features="waf.leak_protection">Leak Protection</a>
+                    </div>
+                </div>
+
+                <!-- Traffic Control Dropdown -->
+                <div class="nav-domain-group" data-domain="traffic" data-permission="waf:read">
+                    <button type="button" class="nav-domain-header" aria-expanded="false">
+                        <span class="nav-domain-title">
+                            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                            </svg>
+                            Traffic Control
+                        </span>
+                        <svg class="nav-domain-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                    <div class="nav-domain-children">
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="traffic_config" data-permission="waf:read">Overview</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="traffic_access_geo" data-permission="traffic:read">IP Blacklist</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="threat_intel" data-permission="traffic:read" data-features="traffic.reputation">IP Reputation</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="ratelimit_config" data-permission="traffic:read" data-features="traffic.rate_limit">Rate Limiting</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="traffic_geo" data-permission="traffic:read" data-features="traffic.geo">Geo-Blocking</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="ddos_config" data-permission="traffic:read" data-features="traffic.ddos">Application Flood</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="traffic_priority" data-permission="traffic:read" data-features="traffic.priority">Trusted Exceptions</a>
+                    </div>
+                </div>
+
+                <!-- Application Security Dropdown -->
+                <div class="nav-domain-group" data-domain="httpsecurity" data-permission="waf:read">
+                    <button type="button" class="nav-domain-header" aria-expanded="false">
+                        <span class="nav-domain-title">
+                            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                <path d="M9 12l2 2 4-4" />
+                            </svg>
+                            Application Security
+                        </span>
+                        <svg class="nav-domain-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                    <div class="nav-domain-children">
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="httpsecurity_config" data-permission="waf:read">Overview</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="httpsec_request" data-permission="waf:read">Request Policy</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="httpsec_payload" data-permission="waf:read" data-features="waf.body_guard">Payload Protection</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="httpsec_upload" data-permission="waf:read" data-features="waf.upload_protection">Upload Security</a>
+                        <a class="nav-link nav-sub-link" tabindex="0" role="button" data-nav-target="httpsec_response" data-permission="waf:read">Response Protection</a>
+                    </div>
+                </div>
+
+                <!-- Bot Defense Dropdown -->
+                <div class="nav-domain-group enterprise-nav-item" data-domain="bots" data-permission="waf:read" data-features="bot.all">
+                    <button type="button" class="nav-domain-header" aria-expanded="false">
+                        <span class="nav-domain-title">
+                            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="11" width="18" height="10" rx="2" />
+                                <circle cx="12" cy="5" r="2" />
+                                <path d="M12 7v4" />
+                                <line x1="8" y1="16" x2="8" y2="16" />
+                                <line x1="16" y1="16" x2="16" y2="16" />
+                            </svg>
+                            Bot Defense
+                        </span>
+                        <svg class="nav-domain-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                    <div class="nav-domain-children">
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="antibots_config" data-permission="waf:read" data-features="bot.all">Overview</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="bot_fingerprinting" data-permission="waf:read" data-features="bot.all">Managed Protection</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="bot_rules" data-permission="waf:read" data-features="bot.all">Custom Rules</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="bot_classification" data-permission="waf:read" data-features="bot.all">Classification</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="bot_ai" data-permission="waf:read" data-features="bot.all">AI Crawlers</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="bot_exceptions" data-permission="waf:read" data-features="bot.all">Exceptions</a>
+                    </div>
+                </div>
+
+                <!-- API Shield Dropdown -->
+                <div class="nav-domain-group enterprise-nav-item" data-domain="api_shield" data-permission="waf:read" data-features="api_security.all">
+                    <button type="button" class="nav-domain-header" aria-expanded="false">
+                        <span class="nav-domain-title">
+                            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M8 9l-4 3 4 3M16 9l4 3-4 3M14 5l-4 14" />
+                            </svg>
+                            API Shield
+                        </span>
+                        <svg class="nav-domain-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                    <div class="nav-domain-children">
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="apisecurity_config" data-permission="waf:read" data-features="api_security.all">Overview</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="api_inventory" data-permission="waf:read" data-features="api_security.all">API Inventory</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="api_schema" data-permission="waf:read" data-features="api_security.all">Contracts</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="api_owasp" data-permission="waf:read" data-features="api_security.all">Authorization</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="api_graphql" data-permission="waf:read" data-features="api_security.all">GraphQL</a>
+                    </div>
+                </div>
+
+                <!-- Edge Access Dropdown -->
+                <div class="nav-domain-group enterprise-nav-item" data-domain="edge_access" data-permission="system:config" data-features="access_control.all">
+                    <button type="button" class="nav-domain-header" aria-expanded="false">
+                        <span class="nav-domain-title">
+                            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="9" cy="8" r="3"/>
+                                <path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 11l2 2 4-4M18 13v6"/>
+                            </svg>
+                            Edge Access
+                        </span>
+                        <svg class="nav-domain-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                    <div class="nav-domain-children">
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="access_config" data-permission="system:config" data-features="access_control.all">Overview</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="access_apps" data-permission="system:config" data-features="access_control.all">Apps</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="access_policies" data-permission="system:config" data-features="access_control.all">Access Policies</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="access_identity" data-permission="system:config" data-features="access_control.all">Identity</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="access_roles" data-permission="system:config" data-features="access_control.all">Roles</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="access_decisions" data-permission="system:config" data-features="access_control.all">Decisions</a>
+                        <a class="nav-link nav-sub-link enterprise-nav-item" tabindex="0" role="button" data-nav-target="access_settings" data-permission="system:config" data-features="access_control.all">Settings</a>
+                    </div>
+                </div>
+
+                <!-- CATEGORY: NETWORK -->
+                <div class="nav-category-label" data-permission="infra:read">Network</div>
+
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="proxy_settings" data-permission="infra:read">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 12h6" />
+                        <path d="M15 12h6" />
+                        <path d="M12 3v6" />
+                        <path d="M12 15v6" />
+                        <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    Proxy Settings
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="routes" data-permission="infra:read">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="2" y1="12" x2="22" y2="12" />
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                    </svg>
+                    Routing
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="upstream" data-permission="infra:read">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="20" height="8" rx="2" />
+                        <rect x="2" y="14" width="20" height="8" rx="2" />
+                        <line x1="6" y1="6" x2="6.01" y2="6" />
+                        <line x1="6" y1="18" x2="6.01" y2="18" />
+                    </svg>
+                    Origins
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="ssl" data-permission="infra:read">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    SSL Certificates
+                </a>
+
+                <!-- CATEGORY: SYSTEM -->
+                <div class="nav-category-label" data-permission="system:config">System</div>
+
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="users" data-permission="users:read" data-features="admin.multi_user admin.rbac">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="7" r="4" />
+                        <path d="M5.5 21a9 9 0 0 1 13 0" />
+                    </svg>
+                    Users
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="audit" data-permission="audit:read" data-features="admin.audit">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    Audit Logs
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="modules" data-permission="system:config">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="8" height="8" rx="1" />
+                        <rect x="14" y="2" width="8" height="8" rx="1" />
+                        <rect x="2" y="14" width="8" height="8" rx="1" />
+                        <path d="M14 17h2a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h0a2 2 0 0 1-2-2" />
+                        <path d="M18 21v-2" />
+                    </svg>
+                    Modules
+                </a>
+                <a class="nav-link" tabindex="0" role="button" data-nav-target="settings" data-permission="system:config">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                    Settings
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main -->
+        <main class="main">
+            <header class="top-bar">
+                <h2 id="page-title" class="title-sm">Dashboard</h2>
+                <div class="top-actions">
+
+                    <!-- Plan Info -->
+                    <div class="top-plan" id="top-plan-container" data-action="open-license" role="button" tabindex="0" title="Manage Licence">
+                        <span class="top-plan-label" id="top-plan-label">Plan</span>
+                        <span id="current-plan-name" class="top-plan-name">Pro</span>
+                    </div>
+
+                    <!-- Upgrade Action -->
+                    <button type="button" id="plan-upgrade-button" class="top-plan-upgrade hidden" data-action="open-upgrade">Upgrade</button>
+
+                    <!-- Alert Bell -->
+                    <div id="alert-bell" class="alert-bell cursor-pointer" data-action="toggle-alert-dropdown">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                        <span id="alert-count" class="alert-badge hidden">0</span>
+                        <!-- Alert Dropdown -->
+                        <div id="alert-dropdown" class="alert-dropdown hidden"></div>
+                    </div>
+
+                    <div class="top-account">
+                        <button class="top-account-trigger" data-action="toggle-account-menu" aria-expanded="false" aria-label="Account menu">
+                            <span class="user-avatar">A</span>
+                        </button>
+                        <div id="account-menu" class="account-menu hidden">
+                            <div class="account-menu-head">
+                                <span class="user-avatar">A</span>
+                                <span class="user-details">
+                                    <span class="user-name">admin</span>
+                                    <span class="user-role">Administrator</span>
+                                </span>
+                            </div>
+                            <label class="account-menu-theme">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="4" />
+                                    <path d="M12 2v2" />
+                                    <path d="M12 20v2" />
+                                    <path d="m4.93 4.93 1.41 1.41" />
+                                    <path d="m17.66 17.66 1.41 1.41" />
+                                    <path d="M2 12h2" />
+                                    <path d="M20 12h2" />
+                                    <path d="m6.34 17.66-1.41 1.41" />
+                                    <path d="m19.07 4.93-1.41 1.41" />
+                                </svg>
+                                <span class="account-menu-theme-copy">
+                                    <span class="account-menu-theme-label">Theme</span>
+                                    <span id="theme-state-label" class="account-menu-theme-state">Light</span>
+                                </span>
+                                <span class="account-theme-switch">
+                                    <input id="admin-theme-switch" type="checkbox" data-action="toggle-theme" role="switch" aria-label="Use dark mode" aria-checked="false">
+                                    <span class="account-theme-slider" aria-hidden="true"></span>
+                                </span>
+                            </label>
+                            <button class="account-menu-item" data-nav-target="profile">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                    <circle cx="12" cy="7" r="4" />
+                                </svg>
+                                <span>Edit profile</span>
+                            </button>
+                            <button class="account-menu-item danger" data-action="logout">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                    <polyline points="16 17 21 12 16 7" />
+                                    <line x1="21" y1="12" x2="9" y2="12" />
+                                </svg>
+                                <span>Logout</span>
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+            </header>
+
+            <!-- System Update Notification Banner -->
+            <div id="system-update-banner" class="system-update-banner hidden" role="region" aria-label="Software update notification"></div>
+
+            <div class="view-container" id="view-root">
+                <!-- Views are injected here by JS -->
+                <div class="view-placeholder">Loading System Core...</div>
+            </div>
+        </main>
+
+        <!-- Global Modals -->
+        <div id="modal-container"></div>
+    </div>
+
+    <!-- Enterprise nav injector (enterprise build only) -->
+    <script type="module" src="/dist/js/enterprise-nav.js?v=14"></script>
+
+    <!-- Admin app bootstrap -->
+    <script type="module" src="/dist/js/app.js?v=157"></script>
+
+    <!-- Admin runtime entrypoint -->
+    <script type="module" src="/dist/js/main.js?v=157"></script>
+</body>
+
+</html>

@@ -1,0 +1,52 @@
+.git
+.codex
+.agent
+.agents
+skills-lock.json
+.vscode
+.playwright-mcp
+node_modules
+
+# Tests and local reports are source-quality assets, not image payload.
+web/admin/tests
+test-results
+playwright-report
+coverage
+
+# Local runtime outputs and captures
+logs
+data/*.jsonl
+data/*.gz
+*.log
+*.out
+test_output.txt
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+
+# Local secrets and generated certs
+.env
+.env.*
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Local binaries and one-off migration helpers
+/aegis-server
+/aegis-updater
+cmd/aegis-server/aegis-server
+fix_*.js
+fix_*.py
+strip_glows.py
+
+# Package/cache noise
+.cache
+.parcel-cache
+.vite
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

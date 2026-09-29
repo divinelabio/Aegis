@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aegis | Reset Password</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/images/favicon.svg">
+    <script type="module" src="/dist/js/auth/theme-init.js?v=2"></script>
+    <link rel="stylesheet" href="/css/variables.css?v=63">
+    <link rel="stylesheet" href="/css/feedback.css?v=22">
+    <link rel="stylesheet" href="/css/auth.css?v=4">
+    <link rel="stylesheet" href="/css/theme-dark.css?v=19">
+    <link rel="stylesheet" href="/css/geometry.css?v=1">
+    <link rel="stylesheet" href="/css/controls.css?v=2">
+    
+</head>
+
+<body>
+    <div class="card">
+        <img src="/images/logo.svg" alt="Aegis" class="logo">
+        <h1>Reset Password</h1>
+        <p class="subtitle">Enter your email address and we'll send you a link to reset your password.</p>
+
+        <div id="alert" class="alert"></div>
+
+        <form id="resetForm">
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" id="email" placeholder="name@company.com" required autofocus>
+            </div>
+            <button type="submit" id="submitBtn">Send Reset Link</button>
+        </form>
+
+        <div class="footer">
+            <a href="/admin/login">Wait, I remember my password</a>
+        </div>
+    </div>
+
+    <script type="module" src="/dist/js/auth/reset-request.js?v=1"></script>
+</body>
+
+</html>

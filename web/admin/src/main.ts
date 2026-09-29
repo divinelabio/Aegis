@@ -1,0 +1,23 @@
+import { api } from './api.js';
+import * as AdminDOM from './core/dom.js';
+import * as AdminEvents from './core/events.js';
+import { notify } from './core/notify.js';
+import { formatNumber, setHTML, setText } from './core/view-helpers.js';
+import { router } from './router.js';
+import { WAFConfigFacade } from './sections/waf-config.js';
+import { SectionUI } from './sections/ui-components.js';
+import { Toast } from './toast.js';
+
+const runtimeGlobals = globalThis as unknown as Record<string, unknown>;
+runtimeGlobals.router = router;
+runtimeGlobals.api = api;
+runtimeGlobals.AdminDOM = AdminDOM;
+runtimeGlobals.AdminEvents = AdminEvents;
+runtimeGlobals.AdminNotify = { show: notify };
+runtimeGlobals.SectionUI = SectionUI;
+runtimeGlobals.WAFConfig = WAFConfigFacade;
+runtimeGlobals.Toast = Toast;
+runtimeGlobals.showToast = (message: unknown, type?: ToastType): void => notify(message, type);
+runtimeGlobals.setText = setText;
+runtimeGlobals.setHTML = setHTML;
+runtimeGlobals.formatNumber = formatNumber;

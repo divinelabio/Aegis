@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316" />
+      <stop offset="100%" stop-color="#ea580c" />
+    </linearGradient>
+    <linearGradient id="grad2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#c2410c" />
+    </linearGradient>
+    
+    <mask id="aegisMask">
+      <rect width="100" height="100" fill="white" />
+      <path d="M50 26 L28 72 H41 L45 62 H55 L59 72 H72 L50 26 Z" fill="black" />
+      <path d="M50 42 L46 51 H54 Z" fill="white" />
+    </mask>
+  </defs>
+
+  <g mask="url(#aegisMask)">
+    <path d="M50 8 L15 22 V50 C15 74 50 92 50 92 V8 Z" fill="url(#grad1)" />
+    <path d="M50 8 L85 22 V50 C85 74 50 92 50 92 V8 Z" fill="url(#grad2)" />
+  </g>
+</svg>

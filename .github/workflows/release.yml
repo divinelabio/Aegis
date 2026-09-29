@@ -1,0 +1,74 @@
+name: Release Aegis Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build & Package Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Build Matrix
+        run: |
+          mkdir -p bin-dist
+
+          stage_assets() {
+            cp config.yaml bin-dist/ 2>/dev/null || true
+            if [ -d "rules" ]; then
+              cp -r rules bin-dist/
+            elif [ -d "data/rules" ]; then
+              cp -r data/rules bin-dist/rules
+            fi
+          }
+
+          # 1. Linux amd64
+          echo "Building Linux amd64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
+          stage_assets
+          tar -czf aegis-linux-amd64.tar.gz -C bin-dist .
+          rm -rf bin-dist/*
+
+          # 2. Linux arm64
+          echo "Building Linux arm64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
+          stage_assets
+          tar -czf aegis-linux-arm64.tar.gz -C bin-dist .
+          rm -rf bin-dist/*
+
+          # 3. Windows amd64
+          echo "Building Windows amd64..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o bin-dist/aegis.exe ./cmd/aegis-server
+          stage_assets
+          (cd bin-dist && zip -r ../aegis-windows-amd64.zip .)
+          rm -rf bin-dist/*
+
+          # Generate Checksums
+          sha256sum aegis-linux-amd64.tar.gz aegis-linux-arm64.tar.gz aegis-windows-amd64.zip > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            aegis-linux-amd64.tar.gz
+            aegis-linux-arm64.tar.gz
+            aegis-windows-amd64.zip
+            checksums.txt
+          generate_release_notes: true

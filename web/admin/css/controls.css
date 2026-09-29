@@ -1,0 +1,743 @@
+
+
+:where(.btn, .btn-primary, .operator-btn-primary):not(
+    .btn-secondary,
+    .btn-outline,
+    .btn-ghost,
+    .btn-danger,
+    .btn-outline-danger,
+    .btn-outline-warning,
+    .btn-outline-success
+) {
+    border-color: var(--control-accent);
+    background: var(--control-accent);
+    color: #ffffff;
+}
+
+:where(.btn, .btn-primary, .operator-btn-primary):not(
+    .btn-secondary,
+    .btn-outline,
+    .btn-ghost,
+    .btn-danger,
+    .btn-outline-danger,
+    .btn-outline-warning,
+    .btn-outline-success
+):hover {
+    border-color: var(--control-accent-hover);
+    background: var(--control-accent-hover);
+    color: #ffffff;
+    filter: none;
+}
+
+:where(.btn-secondary, .btn-outline, .btn-ghost, .operator-btn:not(.operator-btn-primary):not(.operator-btn-danger)) {
+    border-color: var(--border);
+    background: var(--surface-card);
+    color: var(--text-secondary);
+}
+
+:where(.btn-secondary, .btn-outline, .btn-ghost, .operator-btn:not(.operator-btn-primary):not(.operator-btn-danger)):hover {
+    border-color: color-mix(in srgb, var(--control-accent) 42%, var(--border));
+    background: var(--control-accent-soft);
+    color: var(--text-main);
+    filter: none;
+}
+
+:where(.btn, .operator-btn):active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+:where(.btn-sm) {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 11px;
+}
+
+html[data-theme] .edge-access-operator-frame.edge-access-v2-shell .edge-access-v2-table-actions .operator-action-menu-trigger,
+html[data-theme] .edge-access-operator-frame.edge-access-v2-shell .edge-access-v2-table-actions .operator-action-menu-item {
+    min-height: 50px;
+}
+
+:where(.btn-xs, .operator-btn-xs) {
+    min-height: 26px;
+    padding: 0 8px;
+    font-size: 10px;
+}
+
+:where(.btn-danger, .btn-outline-danger, .operator-btn-danger) {
+    border-color: var(--status-danger-border);
+    background: var(--status-danger-bg);
+    color: var(--danger);
+}
+
+:where(.btn-danger, .btn-outline-danger, .operator-btn-danger):hover {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: #ffffff;
+    filter: none;
+}
+
+.btn-outline-warning {
+    border-color: var(--status-warning-border);
+    background: var(--status-warning-bg);
+    color: var(--control-accent-hover);
+}
+
+.btn-outline-success {
+    border-color: var(--status-success-border);
+    background: var(--status-success-bg);
+    color: var(--success);
+}
+
+:where(.icon-btn, .btn-icon, .section-icon-btn) {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+    border: 1px solid var(--border);
+    background: var(--surface-card);
+    color: var(--text-muted);
+}
+
+:where(.icon-btn, .btn-icon, .section-icon-btn):hover {
+    border-color: color-mix(in srgb, var(--control-accent) 42%, var(--border));
+    background: var(--control-accent-soft);
+    color: var(--control-accent-hover);
+}
+
+/* Icon surfaces use orange for actions, semantic colors only for status. */
+:where(.icon-chip, .icon-box-sm, .data-card-icon, .profile-security-icon) {
+    border: 1px solid color-mix(in srgb, var(--control-accent) 18%, var(--border));
+    border-radius: 5px;
+    background: var(--control-accent-soft);
+    color: var(--control-accent-hover);
+    box-shadow: none;
+}
+
+:where(.icon-chip, .icon-box-sm, .data-card-icon, .profile-security-icon) svg {
+    color: currentColor;
+    stroke-width: 1.7;
+}
+
+.icon-chip-success {
+    border-color: var(--status-success-border);
+    background: var(--status-success-bg);
+    color: var(--success);
+}
+
+.icon-chip-danger {
+    border-color: var(--status-danger-border);
+    background: var(--status-danger-bg);
+    color: var(--danger);
+}
+
+.nav-link:hover .nav-icon {
+    color: var(--text-main);
+}
+
+.nav-link.active .nav-icon {
+    color: var(--control-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+}
+
+html[data-theme] :where(.icon-btn, .btn-icon, .section-icon-btn) {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+    border-color: var(--border);
+    background: var(--surface-card);
+    color: var(--text-muted);
+}
+
+html[data-theme] :where(.icon-btn, .btn-icon, .section-icon-btn):hover {
+    border-color: color-mix(in srgb, var(--control-accent) 42%, var(--border));
+    background: var(--control-accent-soft);
+    color: var(--control-accent-hover);
+}
+
+html[data-theme] .btn.btn-outline,
+html[data-theme] .btn.btn-ghost,
+html[data-theme] .operator-btn:not(.operator-btn-primary):not(.operator-btn-danger) {
+    border-color: var(--border);
+    background: var(--surface-card);
+    color: var(--text-secondary);
+}
+
+html[data-theme] .btn.btn-outline:hover,
+html[data-theme] .btn.btn-ghost:hover,
+html[data-theme] .operator-btn:not(.operator-btn-primary):not(.operator-btn-danger):hover {
+    border-color: color-mix(in srgb, var(--control-accent) 42%, var(--border));
+    background: var(--control-accent-soft);
+    color: var(--text-main);
+}
+
+html[data-theme] .section-switch input:checked + .section-switch-slider,
+html[data-theme] .section-switch input:checked + .switch-slider,
+html[data-theme] .section-switch input:checked + .slider,
+html[data-theme] .switch input:checked + .section-switch-slider,
+html[data-theme] .switch input:checked + .slider,
+html[data-theme] .toggle-switch input:checked + .toggle-slider,
+html[data-theme] .settings-toggle input:checked + .toggle-switch,
+html[data-theme] .checkbox-toggle input:checked + .checkbox-toggle-switch {
+    border-color: var(--control-accent);
+    background: var(--control-accent);
+}
+
+/*
+ * Single-orange contract.
+ * Orange is reserved for emphasis; selected and hover surfaces stay neutral so
+ * opacity blends cannot read as additional brand colors.
+ */
+html[data-theme] {
+    --primary: var(--brand-orange);
+    --primary-hover: var(--brand-orange);
+    --primary-muted: var(--surface-interactive);
+    --primary-dim: var(--brand-orange);
+    --primary-glow: transparent;
+    --control-accent: var(--brand-orange);
+    --control-accent-hover: var(--brand-orange);
+    --control-accent-soft: var(--surface-interactive);
+    --control-accent-ring: var(--brand-orange);
+    --status-warning-bg: var(--surface-interactive);
+    --status-warning-border: var(--brand-orange);
+    --status-primary-bg: var(--surface-interactive);
+    --status-primary-border: var(--brand-orange);
+    --surface-selected: var(--surface-interactive);
+}
+
+html[data-theme] .operator-frame {
+    --operator-orange: var(--brand-orange);
+    --operator-link: var(--brand-orange);
+    --operator-link-hover: var(--brand-orange);
+    min-height: 100%;
+    flex: 1 0 auto;
+    background: var(--operator-surface);
+}
+
+html[data-theme] .view.view-operator {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    min-height: 100%;
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+html[data-theme] .view-container {
+    background: var(--operator-surface);
+    display: flex;
+    flex-direction: column;
+}
+
+html[data-theme] :where(
+    .btn-primary,
+    .operator-btn-primary
+):not(.btn-danger, .operator-btn-danger, .is-danger) {
+    border-color: var(--brand-orange) !important;
+    background: var(--brand-orange) !important;
+}
+
+html[data-theme] :where(
+    .btn.btn-secondary,
+    .btn.btn-outline,
+    .btn.btn-ghost,
+    .operator-btn:not(.operator-btn-primary):not(.operator-btn-danger),
+    .icon-btn,
+    .btn-icon,
+    .section-icon-btn
+):hover {
+    border-color: var(--brand-orange);
+    background: var(--surface-interactive);
+}
+
+html[data-theme] :where(
+    .section-switch input:checked + .section-switch-slider,
+    .section-switch input:checked + .switch-slider,
+    .section-switch input:checked + .slider,
+    .switch input:checked + .section-switch-slider,
+    .switch input:checked + .slider,
+    .toggle-switch input:checked + .toggle-slider,
+    .settings-toggle input:checked + .toggle-switch,
+    .checkbox-toggle input:checked + .checkbox-toggle-switch
+) {
+    border-color: var(--brand-orange) !important;
+    background: var(--brand-orange) !important;
+}
+
+html[data-theme] :where(
+    button,
+    [role="button"],
+    input,
+    select,
+    textarea
+):focus-visible {
+    outline-color: var(--brand-orange);
+}
+
+html[data-theme] .httpsec-request-pipeline-node.is-selected,
+html[data-theme] .httpsec-policy-choice-card.is-active {
+    border-color: var(--brand-orange);
+    background: var(--operator-surface, var(--surface-card));
+}
+
+html[data-theme] .httpsec-request-pipeline-node.is-selected {
+    box-shadow: inset 0 -2px 0 var(--brand-orange);
+}
+
+html[data-theme] .httpsec-request-pipeline-node.is-selected .httpsec-request-pipeline-node-index,
+html[data-theme] .httpsec-request-pipeline-node.is-selected .httpsec-request-pipeline-node-icon,
+html[data-theme] .httpsec-request-pipeline-entry.is-destination span {
+    color: var(--brand-orange);
+}
+
+html[data-theme] .httpsec-policy-choice-card.is-active .httpsec-choice-check {
+    border-color: var(--brand-orange);
+    background: var(--brand-orange);
+}
+
+html[data-theme] .httpsec-policy-choice-card.is-active .httpsec-policy-choice-icon {
+    border-color: var(--brand-orange);
+    background: var(--operator-surface, var(--surface-card));
+    color: var(--brand-orange);
+}
+
+.firewall-operator-frame .firewall-leak-page-header {
+    margin: 0 0 12px;
+}
+
+.firewall-operator-frame .firewall-leak-area-row {
+    cursor: pointer;
+}
+
+.firewall-operator-frame .firewall-leak-area-row:hover {
+    background: var(--surface-interactive, var(--operator-surface, var(--surface-card)));
+}
+
+.firewall-operator-frame .firewall-leak-advanced-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding: 14px 0;
+}
+
+.firewall-operator-frame .firewall-leak-mime-list {
+    margin-bottom: 20px;
+}
+
+.firewall-operator-frame .firewall-leak-mime-row {
+    transition: background 0.15s ease;
+}
+
+.firewall-operator-frame .firewall-leak-mime-desc {
+    display: block;
+    color: var(--text-muted, #94a3b8);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.firewall-operator-frame .firewall-leak-mime-tags {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+.firewall-operator-frame .firewall-leak-mime-pill {
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    padding: 1px 7px;
+    letter-spacing: 0.01em;
+}
+
+.firewall-operator-frame .firewall-leak-subhead {
+    margin-top: 24px;
+    margin-bottom: 10px;
+}
+
+.firewall-operator-frame .firewall-leak-subhead h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--text-main);
+}
+
+.firewall-operator-frame .firewall-leak-subhead p {
+    margin: 3px 0 0;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.firewall-operator-frame .firewall-leak-summary,
+.firewall-operator-frame .firewall-leak-empty-state {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.firewall-operator-frame .firewall-leak-exception-groups > .firewall-leak-summary {
+    margin: 0;
+    padding: 12px 14px;
+}
+
+.firewall-operator-frame .firewall-leak-inline-form {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 14px;
+}
+
+.firewall-operator-frame .firewall-leak-inline-form--allowlist {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.firewall-operator-frame .firewall-leak-inline-form .section-input,
+.firewall-operator-frame .firewall-leak-inline-form .select-sm {
+    width: 100%;
+    min-width: 0;
+}
+
+.firewall-operator-frame .firewall-leak-inline-form .firewall-leak-form-field--pattern {
+    grid-column: span 2;
+}
+
+.firewall-operator-frame .firewall-leak-inline-form-action {
+    display: flex;
+    align-items: end;
+    justify-content: flex-end;
+}
+
+.firewall-operator-frame .firewall-leak-inline-form--allowlist .firewall-leak-inline-form-action {
+    grid-column: 1 / -1;
+}
+
+.firewall-operator-frame .firewall-leak-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0 14px 14px;
+    list-style: none;
+}
+
+.firewall-operator-frame .firewall-leak-list-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--operator-line, var(--border-color));
+    background: var(--operator-surface, var(--surface-card));
+}
+
+@media (max-width: 900px) {
+    .firewall-operator-frame .firewall-leak-inline-form,
+    .firewall-operator-frame .firewall-leak-inline-form--allowlist {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .firewall-operator-frame .firewall-leak-inline-form .firewall-leak-form-field--pattern,
+    .firewall-operator-frame .firewall-leak-inline-form--allowlist .firewall-leak-inline-form-action {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 640px) {
+    .firewall-operator-frame .firewall-leak-mime-grid,
+    .firewall-operator-frame .firewall-leak-advanced-grid,
+    .firewall-operator-frame .firewall-leak-inline-form,
+    .firewall-operator-frame .firewall-leak-inline-form--allowlist {
+        grid-template-columns: 1fr;
+    }
+
+    .firewall-operator-frame .firewall-leak-list-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .firewall-operator-frame .firewall-leak-inline-form-action {
+        grid-column: 1 / -1;
+        justify-self: stretch;
+    }
+
+    .firewall-operator-frame .firewall-leak-inline-form-action .btn {
+        width: 100%;
+    }
+
+}
+
+/* ==========================================================================
+   Threat Directory & Unified Threat Feed Table Polish
+   ========================================================================== */
+
+.threat-directory-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    background: var(--operator-surface, #ffffff);
+    border: 1px solid var(--operator-line, #d9dde3);
+    border-radius: var(--radius-sm, 6px);
+}
+
+.threat-directory-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+    font-size: 13px;
+}
+
+.threat-directory-table thead {
+    background: color-mix(in srgb, var(--operator-surface, #ffffff) 92%, #f3f4f6);
+}
+
+[data-theme="dark"] .threat-directory-table thead {
+    background: color-mix(in srgb, var(--operator-surface, #1e2430) 88%, #0f131a);
+}
+
+.threat-directory-table th {
+    padding: 10px 14px;
+    height: 42px;
+    border-bottom: 1px solid var(--operator-line, #d9dde3);
+    color: var(--text-dim, #64748b);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    text-align: left;
+    vertical-align: middle;
+}
+
+[data-theme="dark"] .threat-directory-table th {
+    border-bottom-color: var(--operator-line, #2a3342);
+    color: var(--text-dim, #94a3b8);
+}
+
+.threat-directory-table th.sortable-th {
+    cursor: pointer;
+    user-select: none;
+}
+
+.threat-directory-table th.sortable-th:hover,
+.threat-directory-table th.is-sorted {
+    color: var(--primary, #f97316);
+}
+
+.threat-directory-table .th-content-flex {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.threat-directory-table .sort-icon-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+}
+
+.threat-directory-table th.th-indicator { min-width: 200px; }
+.threat-directory-table th.th-severity { min-width: 105px; }
+.threat-directory-table th.th-score { min-width: 110px; }
+.threat-directory-table th.th-proto { min-width: 70px; }
+.threat-directory-table th.th-category { min-width: 140px; }
+.threat-directory-table th.th-confidence { min-width: 95px; }
+
+.threat-directory-table td {
+    padding: 10px 14px;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--operator-line-soft, #eceff3);
+    background: transparent;
+    color: var(--text-main, #0f172a);
+}
+
+[data-theme="dark"] .threat-directory-table td {
+    border-bottom-color: var(--operator-line-soft, #202735);
+    color: var(--text-main, #f1f5f9);
+}
+
+.threat-directory-row:hover td {
+    background: color-mix(in srgb, var(--operator-surface, #ffffff) 96%, #f1f5f9);
+}
+
+[data-theme="dark"] .threat-directory-row:hover td {
+    background: color-mix(in srgb, var(--operator-surface, #1e2430) 94%, #334155);
+}
+
+.threat-ip-cell {
+    min-width: 230px;
+}
+
+.threat-ip-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.threat-ip-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+}
+
+.threat-ip-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.threat-ip-code {
+    font-family: var(--font-mono, monospace);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main, #0f172a);
+    line-height: 1.2;
+}
+
+[data-theme="dark"] .threat-ip-code {
+    color: var(--text-main, #f8fafc);
+}
+
+.threat-ip-subtitle {
+    font-size: 11px;
+    color: var(--text-muted, #64748b);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+}
+
+[data-theme="dark"] .threat-ip-subtitle {
+    color: var(--text-muted, #94a3b8);
+}
+
+.threat-status-cell {
+    text-align: center;
+}
+
+.flow-blacklist-tools .flow-page-size-select {
+    min-width: 100px;
+}
+
+.flow-blacklist-tools select[data-traffic-action="threat-feed-severity-filter"] {
+    min-width: 240px;
+}
+
+.flow-blacklist-tools .flow-blacklist-search {
+    min-width: 280px;
+}
+
+/* Threat Severity Tags - App native palette (Subtle, non-bright, no status dot) */
+.threat-severity-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1;
+    white-space: nowrap;
+    border: 1px solid transparent;
+}
+
+/* Critical Severity (Red - app danger) */
+.threat-severity-tag.severity-critical,
+.threat-severity-tag.tone-danger,
+.threat-severity-tag.tone-error {
+    background: rgba(220, 38, 38, 0.08);
+    color: #b91c1c;
+    border-color: rgba(220, 38, 38, 0.22);
+}
+
+[data-theme="dark"] .threat-severity-tag.severity-critical,
+[data-theme="dark"] .threat-severity-tag.tone-danger,
+[data-theme="dark"] .threat-severity-tag.tone-error {
+    background: rgba(239, 68, 68, 0.12);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.26);
+}
+
+/* High Severity (Orange - app brand orange) */
+.threat-severity-tag.severity-high,
+.threat-severity-tag.tone-warning {
+    background: rgba(249, 115, 22, 0.08);
+    color: #c2410c;
+    border-color: rgba(249, 115, 22, 0.22);
+}
+
+[data-theme="dark"] .threat-severity-tag.severity-high,
+[data-theme="dark"] .threat-severity-tag.tone-warning {
+    background: rgba(249, 115, 22, 0.12);
+    color: #fdba74;
+    border-color: rgba(249, 115, 22, 0.26);
+}
+
+/* Medium Severity (Response distribution grey/slate: #5f86a2) */
+.threat-severity-tag.severity-medium,
+.threat-severity-tag.tone-info,
+.threat-severity-tag.tone-grey {
+    background: rgba(95, 134, 162, 0.09);
+    color: #43637b;
+    border-color: rgba(95, 134, 162, 0.22);
+}
+
+[data-theme="dark"] .threat-severity-tag.severity-medium,
+[data-theme="dark"] .threat-severity-tag.tone-info,
+[data-theme="dark"] .threat-severity-tag.tone-grey {
+    background: rgba(95, 134, 162, 0.14);
+    color: #9bbcd2;
+    border-color: rgba(95, 134, 162, 0.28);
+}
+
+/* Low Severity / Success Green */
+.threat-severity-tag.severity-low,
+.threat-severity-tag.tone-success {
+    background: rgba(22, 163, 74, 0.08);
+    color: #15803d;
+    border-color: rgba(22, 163, 74, 0.20);
+}
+
+[data-theme="dark"] .threat-severity-tag.severity-low,
+[data-theme="dark"] .threat-severity-tag.tone-success {
+    background: rgba(34, 197, 94, 0.12);
+    color: #86efac;
+    border-color: rgba(34, 197, 94, 0.24);
+}
+
+/* Neutral Tone alias (also mapped to #5f86a2) */
+.threat-severity-tag.tone-neutral {
+    background: rgba(95, 134, 162, 0.08);
+    color: #43637b;
+    border-color: rgba(95, 134, 162, 0.20);
+}
+
+[data-theme="dark"] .threat-severity-tag.tone-neutral {
+    background: rgba(95, 134, 162, 0.12);
+    color: #9bbcd2;
+    border-color: rgba(95, 134, 162, 0.24);
+}
+}
+
+
+
+
+/* Section Inline Button Helper (harmonized across WAF & sections) */
+.section-btn-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

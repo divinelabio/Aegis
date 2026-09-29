@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aegis-geo-update
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: updater
+              image: aegis:latest
+              command: ["/aegis-updater", "geo", "--config", "/etc/aegis/config.yaml"]
+              volumeMounts:
+                - { name: config, mountPath: /etc/aegis, readOnly: true }
+                - { name: data, mountPath: /data }
+          volumes:
+            - { name: config, configMap: { name: aegis-config } }
+            - { name: data, persistentVolumeClaim: { claimName: aegis-data } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aegis-proxy-update
+spec:
+  schedule: "15 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: updater
+              image: aegis:latest
+              command: ["/aegis-updater", "proxies", "--config", "/etc/aegis/config.yaml"]
+              volumeMounts:
+                - { name: config, mountPath: /etc/aegis, readOnly: true }
+                - { name: data, mountPath: /data }
+          volumes:
+            - { name: config, configMap: { name: aegis-config } }
+            - { name: data, persistentVolumeClaim: { claimName: aegis-data } }

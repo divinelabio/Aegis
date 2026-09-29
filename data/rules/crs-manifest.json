@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "OWASP Core Rule Set",
+  "version": "4.25.1",
+  "release_channel": "LTS",
+  "source": "https://github.com/coreruleset/coreruleset/releases/tag/v4.25.1",
+  "asset": "coreruleset-4.25.1-minimal.zip",
+  "asset_sha256": "5d80581c3bfaa824bdc43d612f1b4f586bb6ca38b9d854a9cea4ab3c1a3154b9",
+  "tag_object_sha": "85d2ebd0beeea0b422a4c9cadba85a05dd7955eb",
+  "commit_sha": "3b89d5a05322f448b4b74b9cadc5fb05ac6915ad",
+  "tag_signature_verified_by_github": true,
+  "content_sha256": "9d3778fd0b7f1db6d92f26030218baf70adab860a2373098cce6b009ec11bc4c",
+  "license_file": "CRS-LICENSE.txt",
+  "license_sha256": "97ea43d779892a3aced6dab9ff4815fff90b09f7d133b538de5e5d6c8e3e9f2f",
+  "crs_setup_version": 4251,
+  "rule_files": 27,
+  "data_files": 21,
+  "seclang_directives": 700,
+  "unique_rule_ids": 628
+}

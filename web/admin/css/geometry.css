@@ -1,0 +1,69 @@
+/* Enterprise radius pass: keep the admin UI sharp and consistent. */
+:where(
+    button,
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea,
+    .btn,
+    .btn-outline,
+    .btn-ghost,
+    .icon-btn,
+    .card,
+    [class*="card"],
+    [class*="panel"],
+    [class*="modal"],
+    [class*="popover"],
+    [class*="drawer"],
+    [class*="menu"],
+    [class*="toolbar"],
+    [class*="bar"],
+    [class*="filter"],
+    [class*="chip"],
+    [class*="pill"],
+    [class*="badge"],
+    [class*="tag"],
+    [class*="tab"],
+    [class*="toggle"],
+    [class*="select"],
+    [class*="input"],
+    [class*="search"],
+    [class*="table"],
+    [class*="tile"],
+    [class*="widget"],
+    [class*="shell"],
+    [class*="surface"],
+    [class*="block"],
+    [class*="empty"],
+    [class*="state"]
+) {
+    border-radius: 2px !important;
+}
+
+:where(
+    .status-dot,
+    .dot,
+    .dot-6,
+    .avatar,
+    .user-avatar,
+    .top-account-trigger,
+    .loader-spinner,
+    .progress-ring
+) {
+    border-radius: 50% !important;
+}
+
+.toggle-slider::before {
+    border-radius: 50% !important;
+}
+
+.security-event-workbench-panel,
+.security-event-workbench-action,
+.security-event-inspector-panel,
+.security-event-inspector-close,
+.security-event-workbench-title > span {
+    border-radius: 0 !important;
+}
+
+:where(button, .btn, input, select, textarea) {
+    font-family: var(--font-main, inherit) !important;
+}
