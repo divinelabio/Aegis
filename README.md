@@ -1,10 +1,6 @@
 <p align="center">
   <a href="https://divinelab.io/products/aegis">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-logo-dark.png">
-      <source media="(prefers-color-scheme: light)" srcset="docs/images/aegis-logo-light.png">
-      <img src="docs/images/aegis-logo-light.png" alt="Aegis Logo" width="180">
-    </picture>
+    <img src="docs/images/aegis-logo.png" alt="Aegis Logo" width="180">
   </a>
 </p>
 
@@ -21,27 +17,15 @@
   </a>
   &nbsp;&nbsp;
   <a href="#quick-start">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/btn-install.png">
-      <source media="(prefers-color-scheme: light)" srcset="docs/images/btn-install-light.png">
-      <img src="docs/images/btn-install-light.png" alt="Quick Install" height="38">
-    </picture>
+    <img src="docs/images/btn-install.png" alt="Quick Install" height="38">
   </a>
   &nbsp;&nbsp;
   <a href="https://divinelab.io/products/aegis/docs" target="_blank" rel="noopener noreferrer">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/btn-docs.png">
-      <source media="(prefers-color-scheme: light)" srcset="docs/images/btn-docs-light.png">
-      <img src="docs/images/btn-docs-light.png" alt="Documentation" height="38">
-    </picture>
+    <img src="docs/images/btn-docs.png" alt="Documentation" height="38">
   </a>
   &nbsp;&nbsp;
   <a href="https://demo-aegis.divinelab.io/" target="_blank" rel="noopener noreferrer">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/btn-demo.png">
-      <source media="(prefers-color-scheme: light)" srcset="docs/images/btn-demo-light.png">
-      <img src="docs/images/btn-demo-light.png" alt="Live Demo" height="38">
-    </picture>
+    <img src="docs/images/btn-demo.png" alt="Live Demo" height="38">
   </a>
 </p>
 
