@@ -24,15 +24,24 @@ export function renderThreatDirectorySection(
     const rawIndicators = feedData?.indicators || [];
     const allIndicators: UnifiedThreatIndicator[] = rawIndicators;
     const totalCount = feedData?.total_indicators ?? rawIndicators.length;
-    const isLoading = false;
+    const isLoading = feedData === null;
 
     const ctiSource = feedData?.sources?.cti || feedData?.cti;
     const ctiStatusObj = ctiSource?.status;
     const ctiError = ctiStatusObj?.last_error;
-    const isCtiDisconnected = Boolean(!feedData || (ctiError && totalCount === 0) || ((ctiStatusObj?.failures ?? 0) > 0 && totalCount === 0));
+    const isCtiDisconnected = Boolean(feedData && ((ctiError && totalCount === 0) || ((ctiStatusObj?.failures ?? 0) > 0 && totalCount === 0)));
 
-    const criticalCount = allIndicators.filter(i => (i.score || 0) >= 90 || i.severity === 'CRITICAL').length;
-    const highCount = allIndicators.filter(i => ((i.score || 0) >= 70 && (i.score || 0) < 90) || i.severity === 'HIGH').length;
+    let criticalCount = 0;
+    let highCount = 0;
+    for (let i = 0; i < allIndicators.length; i++) {
+        const item = allIndicators[i];
+        const score = item.score || 0;
+        if (score >= 90 || item.severity === 'CRITICAL') {
+            criticalCount++;
+        } else if ((score >= 70 && score < 90) || item.severity === 'HIGH') {
+            highCount++;
+        }
+    }
 
     // Filtering
     const activeSevFilter = pagination.severityFilter || 'all';
@@ -68,9 +77,10 @@ export function renderThreatDirectorySection(
         );
     }
 
-    // Dynamic Sorting
+    // Dynamic Sorting (Optimized fast string comparison)
     const sortBy = pagination.sortBy || 'score';
     const sortOrder = pagination.sortOrder || 'desc';
+    const fastStrCmp = (s1: string, s2: string) => s1 < s2 ? -1 : s1 > s2 ? 1 : 0;
     const sorted = [...filtered].sort((a, b) => {
         let cmp = 0;
         if (sortBy === 'score') {
@@ -79,15 +89,15 @@ export function renderThreatDirectorySection(
             const mapSev = (s?: string) => s === 'CRITICAL' ? 3 : s === 'HIGH' ? 2 : 1;
             cmp = mapSev(a.severity) - mapSev(b.severity);
         } else if (sortBy === 'indicator') {
-            cmp = a.indicator.localeCompare(b.indicator);
+            cmp = fastStrCmp(a.indicator, b.indicator);
         } else if (sortBy === 'category') {
-            cmp = (a.category || '').localeCompare(b.category || '');
+            cmp = fastStrCmp(a.category || '', b.category || '');
         } else if (sortBy === 'confidence') {
-            cmp = (a.confidence || '').localeCompare(b.confidence || '');
+            cmp = fastStrCmp(a.confidence || '', b.confidence || '');
         } else if (sortBy === 'protocol') {
             const aProto = a.indicator.includes(':') ? 'IPv6' : 'IPv4';
             const bProto = b.indicator.includes(':') ? 'IPv6' : 'IPv4';
-            cmp = aProto.localeCompare(bProto);
+            cmp = fastStrCmp(aProto, bProto);
         }
         return sortOrder === 'desc' ? -cmp : cmp;
     });

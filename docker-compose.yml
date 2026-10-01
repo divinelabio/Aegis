@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${AEGIS_CONTROL_DB_USER:-aegis}
       POSTGRES_PASSWORD: ${AEGIS_CONTROL_DB_PASSWORD:-testdb}
     ports:
-      - "${AEGIS_CONTROL_DB_PORT:-5433}:5432"
+      - "127.0.0.1:${AEGIS_CONTROL_DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -31,8 +31,8 @@ services:
       CLICKHOUSE_USER: ${AEGIS_ANALYTICS_USERNAME:-default}
       CLICKHOUSE_PASSWORD: ${AEGIS_ANALYTICS_DB_PASSWORD:-}
     ports:
-      - "${AEGIS_ANALYTICS_PORT:-9000}:9000"
-      - "${AEGIS_ANALYTICS_HTTP_PORT:-8123}:8123"
+      - "127.0.0.1:${AEGIS_ANALYTICS_PORT:-9000}:9000"
+      - "127.0.0.1:${AEGIS_ANALYTICS_HTTP_PORT:-8123}:8123"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
@@ -50,7 +50,7 @@ services:
     security_opt:
       - label=disable
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:

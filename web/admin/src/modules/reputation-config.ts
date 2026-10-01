@@ -87,8 +87,9 @@ export const ReputationConfig = {
 
   async init(): Promise<void> {
     this.bindEvents();
-    await Promise.all([this.loadConfig(), this.loadThreatFeed()]);
+    await this.loadConfig();
     this.render();
+    void this.loadThreatFeed().then(() => this.render());
   },
 
   bindEvents(): void {

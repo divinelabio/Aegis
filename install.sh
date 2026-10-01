@@ -751,7 +751,7 @@ server:
     host: "0.0.0.0"
     port: 8081
     setup_completed: true
-    secure_cookies: true
+    secure_cookies: false
 
 storage:
   control:
@@ -1056,11 +1056,8 @@ AEGIS_LICENSE_KEY=${LICENSE_KEY}
 ENV_EOF
     chmod 600 /etc/aegis/aegis.env
 
-    # Determine secure cookies setting based on admin bind address
+    # Default secure_cookies to false for initial HTTP admin access (can be enabled via admin console when TLS is configured)
     local admin_secure_cookies=false
-    if [[ "$ADMIN_HOST" != "127.0.0.1" && "$ADMIN_HOST" != "localhost" ]]; then
-        admin_secure_cookies=true
-    fi
 
     # Write Config with updater configuration for in-place upgrades
     cat << CONFIG_EOF > /etc/aegis/config.yaml

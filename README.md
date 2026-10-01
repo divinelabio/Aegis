@@ -1,9 +1,9 @@
 <p align="center">
-  <a href="https://aegis.io">
+  <a href="https://divinelab.io/products/aegis">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-logo-dark.png">
-      <source media="(prefers-color-scheme: light)" srcset="docs/images/aegis-logo-light.png">
-      <img src="docs/images/aegis-logo-light.png" alt="Aegis Logo" width="180">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/aegis-logo-light.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/aegis-logo-dark.png">
+      <img src="docs/images/aegis-logo-dark.png" alt="Aegis Logo" width="180">
     </picture>
   </a>
 </p>
@@ -12,29 +12,41 @@
 
 <p align="center">
   <strong>Open-Source Web Application Firewall &amp; Edge Security Gateway</strong><br>
-  High-performance reverse proxy delivering real-time OWASP CRS threat defense, Layer 7 rate limiting, and dynamic zero-downtime policy control.
+  High-performance reverse proxy delivering real-time threat defense, Layer 7 rate limiting, and dynamic zero-downtime policy control.
 </p>
 
 <p align="center">
   <a href="https://demo-aegis.divinelab.io/" target="_blank" rel="noopener noreferrer">
-    <img src="docs/images/btn-demo.svg" alt="Live Demo" height="38">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/btn-demo-light.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/btn-demo.png">
+      <img src="docs/images/btn-demo.png" alt="Live Demo" height="38">
+    </picture>
   </a>
   &nbsp;&nbsp;
   <a href="https://divinelab.io/products/aegis/docs" target="_blank" rel="noopener noreferrer">
-    <img src="docs/images/btn-docs.svg" alt="Documentation" height="38">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/btn-docs-light.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/btn-docs.png">
+      <img src="docs/images/btn-docs.png" alt="Documentation" height="38">
+    </picture>
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://divinelab.io/products/aegis" target="_blank" rel="noopener noreferrer">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/btn-website-light.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/btn-website.png">
+      <img src="docs/images/btn-website.png" alt="Website" height="38">
+    </picture>
   </a>
   &nbsp;&nbsp;
   <a href="#quick-start">
-    <img src="docs/images/btn-install.svg" alt="Quick Install" height="38">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/btn-install-light.png">
+      <source media="(prefers-color-scheme: light)" srcset="docs/images/btn-install.png">
+      <img src="docs/images/btn-install.png" alt="Quick Install" height="38">
+    </picture>
   </a>
-</p>
-
-<p align="center">
-  <a href="#overview">Overview</a> •
-  <a href="#key-capabilities">Key Capabilities</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#web-console">Web Console</a> •
-  <a href="#license">License</a>
 </p>
 
 ---
@@ -221,7 +233,7 @@ aegis run -c config.yaml
 .\aegis.exe run -c config.yaml
 ```
 
-> **Web Admin Console:** Once running, navigate to **`http://localhost:8081`** in your browser. (The full web dashboard is embedded inside the binary; no Node.js or web server required).
+> **Web Admin Console:** Once running, navigate to **`http://<your-server-ip>:8081`** in your browser. (The full web dashboard is embedded inside the binary; no Node.js or web server required).
 
 ---
 
@@ -267,7 +279,7 @@ Aegis Community Edition provides complete Layer-7 WAF protection. For enterprise
 * **Payload & File Upload Security:** Deep payload inspection and antivirus integration for uploaded files.
 * **OpenAPI 3.0 Contract Enforcement:** Strict API schema validation and rogue endpoint blocking.
 
-To upgrade or obtain an evaluation license, visit [divinelab.io/products/aegis](https://divinelab.io).
+To upgrade or obtain an evaluation license, visit [divinelab.io/products/aegis](https://divinelab.io/products/aegis).
 
 
 ---

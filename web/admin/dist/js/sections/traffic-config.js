@@ -1213,6 +1213,9 @@ const TrafficConfig = {
         this.threatFeedPage = false;
         this.rateLimitView = 'table';
         this.editingRateRuleIndex = null;
+        if (id === 'reputation' && !this.threatFeedData) {
+            void this.loadThreatFeed().then(() => this.render());
+        }
         this.render();
         const targetMap = {
             overview: 'traffic_config',

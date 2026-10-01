@@ -41,8 +41,9 @@ export const ReputationConfig = {
     eventsBound: false,
     async init() {
         this.bindEvents();
-        await Promise.all([this.loadConfig(), this.loadThreatFeed()]);
+        await this.loadConfig();
         this.render();
+        void this.loadThreatFeed().then(() => this.render());
     },
     bindEvents() {
         if (this.eventsBound)
