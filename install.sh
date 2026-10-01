@@ -201,6 +201,29 @@ detect_environment() {
     done
 }
 
+print_docker_install_instructions() {
+    echo -e "${CYAN}${BOLD}Please install Docker and Docker Compose first, then re-run this script:${RESET}"
+    echo ""
+    if command -v apt-get >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}sudo apt update && sudo apt install -y docker.io docker-compose-plugin${RESET}"
+        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}sudo dnf install -y docker docker-compose-plugin${RESET}"
+        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
+    elif command -v yum >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}sudo yum install -y docker${RESET}"
+        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}sudo pacman -S docker docker-compose${RESET}"
+        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
+    else
+        echo -e "  ${YELLOW}Please install Docker Engine and Docker Compose using your system's package manager.${RESET}"
+    fi
+    echo ""
+    echo -e "${DIM}Tip: You can re-run this installer and choose Option 2 to install Aegis directly without Docker.${RESET}"
+    echo ""
+}
+
 # ------------------------------------------------------------------------------
 # Choice: Deployment Method (Docker vs Direct Binary)
 # ------------------------------------------------------------------------------
@@ -211,6 +234,13 @@ resolve_deploy_method() {
     fi
 
     if [[ -n "$DEPLOY_METHOD" ]]; then
+        if [[ "$DEPLOY_METHOD" == "docker" ]] && ! $docker_available; then
+            echo ""
+            log_error "Docker deployment was selected, but Docker is not installed on this system."
+            echo ""
+            print_docker_install_instructions
+            exit 1
+        fi
         return 0
     fi
 
@@ -231,30 +261,25 @@ resolve_deploy_method() {
         echo ""
         echo "Please select a deployment method:"
         echo ""
-        echo -e "  ${BOLD}[1] Install Docker automatically and deploy Aegis (Recommended)${RESET}"
-        echo -e "      ${DIM}Installs official Docker engine & Compose, then boots the isolated stack.${RESET}"
+        echo -e "  ${BOLD}[1] Docker Container Stack${RESET}"
+        echo -e "      ${DIM}Requires Docker Engine & Docker Compose to be installed on this host.${RESET}"
         echo ""
-        echo -e "  ${BOLD}[2] Install Aegis directly as a native systemd service (Direct Binary)${RESET}"
+        echo -e "  ${BOLD}[2] Install Aegis directly as a native systemd service (Direct Binary - Recommended)${RESET}"
         echo -e "      ${DIM}Lightweight bare-metal installation. No containers, zero virtualization overhead.${RESET}"
         echo ""
         echo -e "  ${BOLD}[3] Cancel installation${RESET}"
         echo ""
 
-        read -rp "Enter choice [1-3] (Default: 1): " choice </dev/tty || choice="1"
-        choice="${choice:-1}"
+        read -rp "Enter choice [1-3] (Default: 2): " choice </dev/tty || choice="2"
+        choice="${choice:-2}"
 
         case "$choice" in
             1)
-                if ask_user_permission "Proceed with installing Docker Engine from get.docker.com on this system?" "Y"; then
-                    log_step "Installing Docker engine..."
-                    curl -fsSL https://get.docker.com | sh
-                    systemctl enable --now docker
-                    DEPLOY_METHOD="docker"
-                    log_success "Docker installed and activated."
-                else
-                    log_warn "Docker installation declined. Falling back to direct binary."
-                    DEPLOY_METHOD="direct"
-                fi
+                echo ""
+                log_error "Docker is not installed on this system."
+                echo ""
+                print_docker_install_instructions
+                exit 1
                 ;;
             2)
                 DEPLOY_METHOD="direct"
@@ -645,6 +670,17 @@ configure_parameters() {
 deploy_docker_stack() {
     log_step "Deploying Aegis stack via Docker Compose..."
     mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
+    for candidate_rules in "./data/rules" "./rules" "../data/rules" "../rules" "$(dirname "$0")/data/rules" "$(dirname "$0")/rules"; do
+        if [[ -d "$candidate_rules" ]]; then
+            mkdir -p "${INSTALL_DIR}/data/rules"
+            cp -r "$candidate_rules"/. "${INSTALL_DIR}/data/rules/" 2>/dev/null || true
+            if [[ -d "${INSTALL_DIR}/rules" && ! -L "${INSTALL_DIR}/rules" ]]; then
+                rm -rf "${INSTALL_DIR}/rules"
+            fi
+            ln -sfn "${INSTALL_DIR}/data/rules" "${INSTALL_DIR}/rules" 2>/dev/null || true
+            break
+        fi
+    done
     cd "${INSTALL_DIR}"
 
     # Write docker-compose.yml
@@ -669,6 +705,8 @@ services:
     volumes:
       - ./config.yaml:/var/lib/aegis/config.yaml:ro
       - ./data:/var/lib/aegis/data
+      - ./data/rules:/var/lib/aegis/data/rules:ro
+      - ./data/rules:/var/lib/aegis/rules:ro
       - ./logs:/var/lib/aegis/logs
     depends_on:
       clickhouse:
@@ -972,6 +1010,10 @@ deploy_direct_binary() {
     # Deploy WAF rules (OWASP CRS and custom rules)
     log_info "Deploying WAF rules signatures..."
     local search_rules=(
+        "${INSTALL_DIR}/releases/initial/data/rules"
+        "${INSTALL_DIR}/releases/initial/rules"
+        "${INSTALL_DIR}/current/data/rules"
+        "${INSTALL_DIR}/current/rules"
         "./data/rules"
         "./rules"
         "../data/rules"
@@ -985,15 +1027,60 @@ deploy_direct_binary() {
     )
     local found_rules=false
     for candidate_rules in "${search_rules[@]}"; do
-        if [[ -d "$candidate_rules" ]]; then
+        if [[ -d "$candidate_rules" && -d "$candidate_rules/crs" ]]; then
             log_info "Found WAF rules at: $candidate_rules"
-            mkdir -p "${INSTALL_DIR}/data"
-            cp -r "$candidate_rules" "${INSTALL_DIR}/data/"
+            mkdir -p "${INSTALL_DIR}/data/rules"
+            if [[ "$candidate_rules" != "${INSTALL_DIR}/data/rules" ]]; then
+                cp -r "$candidate_rules"/. "${INSTALL_DIR}/data/rules/" 2>/dev/null || true
+            fi
+            if [[ -d "${INSTALL_DIR}/rules" && ! -L "${INSTALL_DIR}/rules" ]]; then
+                rm -rf "${INSTALL_DIR}/rules"
+            fi
+            ln -sfn "${INSTALL_DIR}/data/rules" "${INSTALL_DIR}/rules" 2>/dev/null || true
+            found_rules=true
+            break
+        elif [[ -d "$candidate_rules" ]]; then
+            log_info "Found WAF rules at: $candidate_rules"
+            mkdir -p "${INSTALL_DIR}/data/rules"
+            if [[ "$candidate_rules" != "${INSTALL_DIR}/data/rules" ]]; then
+                cp -r "$candidate_rules"/. "${INSTALL_DIR}/data/rules/" 2>/dev/null || true
+            fi
+            if [[ -d "${INSTALL_DIR}/rules" && ! -L "${INSTALL_DIR}/rules" ]]; then
+                rm -rf "${INSTALL_DIR}/rules"
+            fi
             ln -sfn "${INSTALL_DIR}/data/rules" "${INSTALL_DIR}/rules" 2>/dev/null || true
             found_rules=true
             break
         fi
     done
+    # Flatten any mistakenly nested data/rules/rules directory
+    if [[ -d "${INSTALL_DIR}/data/rules/rules/crs" && ! -d "${INSTALL_DIR}/data/rules/crs" ]]; then
+        cp -r "${INSTALL_DIR}/data/rules/rules"/. "${INSTALL_DIR}/data/rules/" 2>/dev/null || true
+        rm -rf "${INSTALL_DIR}/data/rules/rules"
+    fi
+    if ! $found_rules; then
+        log_info "Downloading official OWASP CRS rules package..."
+        local rules_tar_url="https://github.com/${GITHUB_REPO}/archive/refs/heads/main.tar.gz"
+        if curl -fsSL "$rules_tar_url" -o "/tmp/aegis_repo.tar.gz" 2>/dev/null; then
+            mkdir -p "/tmp/aegis_extract" "${INSTALL_DIR}/data/rules"
+            if tar -xzf "/tmp/aegis_repo.tar.gz" -C "/tmp/aegis_extract" 2>/dev/null; then
+                local extracted_crs
+                extracted_crs=$(find /tmp/aegis_extract -type d \( -name "crs" -path "*/rules/crs" \) 2>/dev/null | head -n 1)
+                if [[ -n "$extracted_crs" ]]; then
+                    local rules_src
+                    rules_src=$(dirname "$extracted_crs")
+                    cp -r "$rules_src"/. "${INSTALL_DIR}/data/rules/" 2>/dev/null || true
+                    if [[ -d "${INSTALL_DIR}/rules" && ! -L "${INSTALL_DIR}/rules" ]]; then
+                        rm -rf "${INSTALL_DIR}/rules"
+                    fi
+                    ln -sfn "${INSTALL_DIR}/data/rules" "${INSTALL_DIR}/rules" 2>/dev/null || true
+                    found_rules=true
+                    log_success "Downloaded and deployed WAF rules to ${INSTALL_DIR}/data/rules."
+                fi
+            fi
+            rm -rf "/tmp/aegis_extract" "/tmp/aegis_repo.tar.gz"
+        fi
+    fi
     if ! $found_rules; then
         log_warn "WAF rules directory was not found in common locations. Coraza CRS rules may need to be placed in ${INSTALL_DIR}/data/rules."
     fi

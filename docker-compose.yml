@@ -90,6 +90,8 @@ services:
     volumes:
       - ./config.yaml:/var/lib/aegis/config.yaml:ro
       - aegis_data:/var/lib/aegis/data
+      - ./data/rules:/var/lib/aegis/data/rules:ro
+      - ./data/rules:/var/lib/aegis/rules:ro
 
 volumes:
   postgres_data:

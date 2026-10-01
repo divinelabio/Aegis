@@ -29,10 +29,13 @@ jobs:
 
           stage_assets() {
             cp config.yaml bin-dist/ 2>/dev/null || true
-            if [ -d "rules" ]; then
-              cp -r rules bin-dist/
-            elif [ -d "data/rules" ]; then
-              cp -r data/rules bin-dist/rules
+            mkdir -p bin-dist/data/rules bin-dist/rules
+            if [ -d "data/rules" ]; then
+              cp -r data/rules/. bin-dist/data/rules/
+              cp -r data/rules/. bin-dist/rules/
+            elif [ -d "rules" ]; then
+              cp -r rules/. bin-dist/data/rules/
+              cp -r rules/. bin-dist/rules/
             fi
           }
 

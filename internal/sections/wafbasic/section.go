@@ -172,18 +172,10 @@ func (s *Section) Init(input sections.SectionConfig) error {
 		config.Engine.AnomalyThreshold = 5
 	}
 	if config.Engine.CRSPath == "" || config.Engine.CRSPath == "rules/crs" {
-		if _, err := os.Stat("rules/crs"); err == nil {
-			config.Engine.CRSPath = "rules/crs"
-		} else {
-			config.Engine.CRSPath = "data/rules/crs"
-		}
+		config.Engine.CRSPath = "data/rules/crs"
 	}
 	if config.Engine.CRSSetupPath == "" || config.Engine.CRSSetupPath == "rules/crs-setup.conf" {
-		if _, err := os.Stat("rules/crs-setup.conf"); err == nil {
-			config.Engine.CRSSetupPath = "rules/crs-setup.conf"
-		} else {
-			config.Engine.CRSSetupPath = "data/rules/crs-setup.conf"
-		}
+		config.Engine.CRSSetupPath = "data/rules/crs-setup.conf"
 	}
 	if config.Validation.MaxBodySize <= 0 {
 		config.Validation.MaxBodySize = 10 << 20
@@ -326,23 +318,15 @@ func buildWAF(config Config, logger *zap.Logger) (coraza.WAF, error) {
 	}
 	if config.Engine.EnableCRS {
 		setupPath := config.Engine.CRSSetupPath
-		if _, err := os.Stat(setupPath); os.IsNotExist(err) {
-			if _, err := os.Stat("data/rules/crs-setup.conf"); err == nil {
-				setupPath = "data/rules/crs-setup.conf"
-			} else if _, err := os.Stat("rules/crs-setup.conf"); err == nil {
-				setupPath = "rules/crs-setup.conf"
-			}
+		if setupPath == "" || setupPath == "rules/crs-setup.conf" {
+			setupPath = "data/rules/crs-setup.conf"
 		}
 		if info, err := os.Stat(setupPath); err == nil && !info.IsDir() {
 			builder = builder.WithDirectivesFromFile(setupPath)
 		}
 		crsPath := config.Engine.CRSPath
-		if _, err := os.Stat(crsPath); os.IsNotExist(err) {
-			if _, err := os.Stat("data/rules/crs"); err == nil {
-				crsPath = "data/rules/crs"
-			} else if _, err := os.Stat("rules/crs"); err == nil {
-				crsPath = "rules/crs"
-			}
+		if crsPath == "" || crsPath == "rules/crs" {
+			crsPath = "data/rules/crs"
 		}
 		files, err := ruleFiles(crsPath, config.DisabledCRS)
 		if err != nil && !os.IsNotExist(err) {
@@ -356,6 +340,9 @@ func buildWAF(config Config, logger *zap.Logger) (coraza.WAF, error) {
 }
 
 func ruleFiles(root string, disabled []string) ([]string, error) {
+	if root == "" || root == "rules/crs" {
+		root = "data/rules/crs"
+	}
 	files := []string{}
 	disabledSet := make(map[string]struct{}, len(disabled))
 	for _, name := range disabled {

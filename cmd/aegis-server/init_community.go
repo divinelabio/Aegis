@@ -19,8 +19,8 @@ var (
 	LicenseAPIURL        = "https://license.divinelab.io"
 	LicenseIssuer        = "https://license.divinelab.io"
 	LicenseAudience      = "aegis-runtime"
-	LicenseRootPublicKey = ""
-	LicenseSignedKeySet  = ""
+	LicenseRootPublicKey = "QaL+N7zeR2BPphhqoUTBB3ddp7y3KW6u33LHWBSQ8BU"
+	LicenseSignedKeySet  = "eyJwYXlsb2FkIjoiZXlKMlpYSnphVzl1SWpveExDSnJaWGx6SWpwN0lteGxZWE5sTFRJd01qWWlPbnNpWVd4bmIzSnBkR2h0SWpvaVJXUXlOVFV4T1NJc0luQjFjbkJ2YzJVaU9pSnNaV0Z6WlNJc0luQjFZbXhwWTE5clpYa2lPaUlyVVdaa2NucEdRM2QxZGpad2VHOVlMeTl3UVZkTVJFOUZlbmR2YWswdmJrODVaa1ZCWm5GTUsyTnpJaXdpYm05MFgySmxabTl5WlNJNklqSXdNall0TURrdE1EUlVNVEk2TWpZNk5USXVOelkyTURZeU5sb2lMQ0p1YjNSZllXWjBaWElpT2lJeU1ETTJMVEE1TFRBMFZERXpPakkyT2pVeUxqYzJOakEyTWpaYUluMTlmUSIsInNpZ25hdHVyZSI6Ikg0d1g4QldJTEhFV3FlUDM4dE9nakp3YjlLd24zZ3lsbl83SkxxOTF2QzhybENmdlh2UzBjalFxNkxiTkw3bFVXOXZxNDZnU0xxWGhKZTAtRm8tTkRnIn0"
 )
 
 var communityLicenseManager licensing.Manager

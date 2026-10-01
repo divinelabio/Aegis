@@ -30,6 +30,7 @@ COPY --from=builder /aegis-updater /aegis-updater
 COPY --from=builder --chown=nonroot:nonroot /runtime/ /var/lib/aegis/
 COPY --from=builder --chown=nonroot:nonroot /app/web/ /var/lib/aegis/web/
 COPY --from=builder --chown=nonroot:nonroot /app/data/rules/ /var/lib/aegis/data/rules/
+COPY --from=builder --chown=nonroot:nonroot /app/data/rules/ /var/lib/aegis/rules/
 
 # Copy configuration (if present in context, otherwise user must mount it)
 # Mount the installation config at /var/lib/aegis/config.yaml or set

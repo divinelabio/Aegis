@@ -370,6 +370,9 @@ func (s *Section) handleCRSRules(w http.ResponseWriter, r *http.Request) {
 	root := s.config.Engine.CRSPath
 	disabled := append([]string(nil), s.config.DisabledCRS...)
 	s.mu.RUnlock()
+	if root == "" || root == "rules/crs" {
+		root = "data/rules/crs"
+	}
 	files, err := allCRSFiles(root)
 	if err != nil {
 		http.Error(w, "CRS rules are unavailable", http.StatusServiceUnavailable)
@@ -537,12 +540,8 @@ func (s *Section) handleCRSRulesBulk(w http.ResponseWriter, r *http.Request) {
 }
 
 func allCRSFiles(root string) ([]string, error) {
-	if _, err := os.Stat(root); os.IsNotExist(err) {
-		if info, err := os.Stat("data/rules/crs"); err == nil && info.IsDir() {
-			root = "data/rules/crs"
-		} else if info, err := os.Stat("rules/crs"); err == nil && info.IsDir() {
-			root = "rules/crs"
-		}
+	if root == "" || root == "rules/crs" {
+		root = "data/rules/crs"
 	}
 	files := []string{}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

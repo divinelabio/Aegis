@@ -6,7 +6,7 @@ access_log:
 geoip:
     db_path: ./data/dbip-country.mmdb
 license:
-    api_url: ""
+    api_url: "https://license.divinelab.io"
     state_dir: ./data/license
 log:
     format: json
