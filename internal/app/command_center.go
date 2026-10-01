@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/storage"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/sections"
 )
 
 type CommandCenterQuery struct {

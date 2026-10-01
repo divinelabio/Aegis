@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/config"
 )
 
 type ClientInfo struct {

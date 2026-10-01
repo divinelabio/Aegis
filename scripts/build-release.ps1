@@ -1,5 +1,5 @@
 param(
-    [string]$Version = 'dev',
+    [string]$Version = '1.0.1',
     [string]$OutputDir = 'dist'
 )
 
@@ -24,7 +24,7 @@ try {
     $env:CGO_ENABLED = '0'
     $env:GOOS = 'windows'
     $env:GOARCH = 'amd64'
-    $serverFlags = "-s -w -X main.Version=$Version -X main.BuildDate=$buildDate -X github.com/divinelab-io/aegis/internal/core/admin.Version=$Version -X github.com/divinelab-io/aegis/internal/core/admin.BuildDate=$buildDate"
+    $serverFlags = "-s -w -X main.Version=$Version -X main.BuildDate=$buildDate -X github.com/divinelabio/aegis/internal/core/admin.Version=$Version -X github.com/divinelabio/aegis/internal/core/admin.BuildDate=$buildDate"
     & go build -trimpath -ldflags $serverFlags -o (Join-Path $output 'aegis.exe') ./cmd/aegis-server
     & go build -trimpath -ldflags "-s -w -X main.Version=$Version -X main.BuildDate=$buildDate" -o (Join-Path $output 'aegis-updater.exe') ./cmd/aegis-updater
     & go build -trimpath -ldflags "-s -w -X main.Version=$Version -X main.BuildDate=$buildDate" -o (Join-Path $output 'aegisctl.exe') ./cmd/aegisctl

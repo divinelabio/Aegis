@@ -15,9 +15,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
-	"github.com/divinelab-io/aegis/internal/infra/telemetry"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/telemetry"
 	"go.uber.org/zap"
 )
 

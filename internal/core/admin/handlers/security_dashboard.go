@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/edition"
-	"github.com/divinelab-io/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/infra/storage"
 	"go.uber.org/zap"
 )
 

@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/storage"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/sections"
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"

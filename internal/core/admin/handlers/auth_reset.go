@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/core/user"
-	"github.com/divinelab-io/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/core/user"
+	"github.com/divinelabio/aegis/internal/infra/config"
 	"go.uber.org/zap"
 )
 

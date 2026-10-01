@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/sections"
 	"go.uber.org/zap"
 )
 

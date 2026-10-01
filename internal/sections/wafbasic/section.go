@@ -22,10 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
-	"github.com/divinelab-io/aegis/internal/infra/storage"
-	"github.com/divinelab-io/aegis/internal/infra/transport"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/transport"
+	"github.com/divinelabio/aegis/internal/sections"
 	"github.com/google/uuid"
 	"github.com/corazawaf/coraza/v3"
 	corazatypes "github.com/corazawaf/coraza/v3/types"
@@ -318,15 +318,39 @@ func buildWAF(config Config, logger *zap.Logger) (coraza.WAF, error) {
 	}
 	if config.Engine.EnableCRS {
 		setupPath := config.Engine.CRSSetupPath
-		if setupPath == "" || setupPath == "rules/crs-setup.conf" {
-			setupPath = "data/rules/crs-setup.conf"
+		if setupPath == "" || setupPath == "rules/crs-setup.conf" || setupPath == "data/rules/crs-setup.conf" {
+			if _, err := os.Stat("data/rules/crs-setup.conf"); err == nil {
+				setupPath = "data/rules/crs-setup.conf"
+			} else if _, err := os.Stat("rules/crs-setup.conf"); err == nil {
+				setupPath = "rules/crs-setup.conf"
+			} else {
+				setupPath = "data/rules/crs-setup.conf"
+			}
+		} else if _, err := os.Stat(setupPath); os.IsNotExist(err) {
+			if _, err := os.Stat("data/rules/crs-setup.conf"); err == nil {
+				setupPath = "data/rules/crs-setup.conf"
+			} else if _, err := os.Stat("rules/crs-setup.conf"); err == nil {
+				setupPath = "rules/crs-setup.conf"
+			}
 		}
 		if info, err := os.Stat(setupPath); err == nil && !info.IsDir() {
 			builder = builder.WithDirectivesFromFile(setupPath)
 		}
 		crsPath := config.Engine.CRSPath
-		if crsPath == "" || crsPath == "rules/crs" {
-			crsPath = "data/rules/crs"
+		if crsPath == "" || crsPath == "rules/crs" || crsPath == "data/rules/crs" {
+			if _, err := os.Stat("data/rules/crs"); err == nil {
+				crsPath = "data/rules/crs"
+			} else if _, err := os.Stat("rules/crs"); err == nil {
+				crsPath = "rules/crs"
+			} else {
+				crsPath = "data/rules/crs"
+			}
+		} else if _, err := os.Stat(crsPath); os.IsNotExist(err) {
+			if _, err := os.Stat("data/rules/crs"); err == nil {
+				crsPath = "data/rules/crs"
+			} else if _, err := os.Stat("rules/crs"); err == nil {
+				crsPath = "rules/crs"
+			}
 		}
 		files, err := ruleFiles(crsPath, config.DisabledCRS)
 		if err != nil && !os.IsNotExist(err) {
@@ -340,8 +364,20 @@ func buildWAF(config Config, logger *zap.Logger) (coraza.WAF, error) {
 }
 
 func ruleFiles(root string, disabled []string) ([]string, error) {
-	if root == "" || root == "rules/crs" {
-		root = "data/rules/crs"
+	if root == "" || root == "rules/crs" || root == "data/rules/crs" {
+		if _, err := os.Stat("data/rules/crs"); err == nil {
+			root = "data/rules/crs"
+		} else if _, err := os.Stat("rules/crs"); err == nil {
+			root = "rules/crs"
+		} else {
+			root = "data/rules/crs"
+		}
+	} else if _, err := os.Stat(root); os.IsNotExist(err) {
+		if _, err := os.Stat("data/rules/crs"); err == nil {
+			root = "data/rules/crs"
+		} else if _, err := os.Stat("rules/crs"); err == nil {
+			root = "rules/crs"
+		}
 	}
 	files := []string{}
 	disabledSet := make(map[string]struct{}, len(disabled))

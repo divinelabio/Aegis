@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/edition"
 )
 
 type Status string

@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/config"
 )
 
 type routeContextKey struct{}

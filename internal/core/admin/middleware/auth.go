@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/core/user"
+	"github.com/divinelabio/aegis/internal/core/user"
 	"github.com/alexedwards/scs/v2"
 	"github.com/google/uuid"
 )

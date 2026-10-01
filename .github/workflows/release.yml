@@ -41,29 +41,38 @@ jobs:
 
           # 1. Linux amd64
           echo "Building Linux amd64..."
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis-updater ./cmd/aegis-updater 2>/dev/null || true
+          cp bin-dist/aegis aegis-linux-amd64
+          cp bin-dist/aegisctl aegisctl-linux-amd64 2>/dev/null || true
+          cp bin-dist/aegis-updater aegis-updater-linux-amd64 2>/dev/null || true
           stage_assets
           tar -czf aegis-linux-amd64.tar.gz -C bin-dist .
           rm -rf bin-dist/*
 
           # 2. Linux arm64
           echo "Building Linux arm64..."
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis-updater ./cmd/aegis-updater 2>/dev/null || true
+          cp bin-dist/aegis aegis-linux-arm64
+          cp bin-dist/aegisctl aegisctl-linux-arm64 2>/dev/null || true
+          cp bin-dist/aegis-updater aegis-updater-linux-arm64 2>/dev/null || true
           stage_assets
           tar -czf aegis-linux-arm64.tar.gz -C bin-dist .
           rm -rf bin-dist/*
 
           # 3. Windows amd64
           echo "Building Windows amd64..."
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o bin-dist/aegis.exe ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis.exe ./cmd/aegis-server
+          cp bin-dist/aegis.exe aegis-windows-amd64.exe
           stage_assets
           (cd bin-dist && zip -r ../aegis-windows-amd64.zip .)
           rm -rf bin-dist/*
 
           # Generate Checksums
-          sha256sum aegis-linux-amd64.tar.gz aegis-linux-arm64.tar.gz aegis-windows-amd64.zip > checksums.txt
+          sha256sum aegis-linux-amd64.tar.gz aegis-linux-arm64.tar.gz aegis-windows-amd64.zip aegis-linux-amd64 aegis-linux-arm64 aegis-windows-amd64.exe > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -73,5 +82,12 @@ jobs:
             aegis-linux-amd64.tar.gz
             aegis-linux-arm64.tar.gz
             aegis-windows-amd64.zip
+            aegis-linux-amd64
+            aegis-linux-arm64
+            aegisctl-linux-amd64
+            aegisctl-linux-arm64
+            aegis-updater-linux-amd64
+            aegis-updater-linux-arm64
+            aegis-windows-amd64.exe
             checksums.txt
           generate_release_notes: true

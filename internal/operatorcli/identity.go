@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/core/user"
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/core/user"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/storage"
 	"github.com/google/uuid"
 )
 

@@ -13,22 +13,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/analytics"
-	"github.com/divinelab-io/aegis/internal/app"
-	"github.com/divinelab-io/aegis/internal/core/admin"
-	"github.com/divinelab-io/aegis/internal/core/pipeline"
-	"github.com/divinelab-io/aegis/internal/core/user"
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/infra/configstore"
-	"github.com/divinelab-io/aegis/internal/infra/geoip"
-	"github.com/divinelab-io/aegis/internal/infra/health"
-	"github.com/divinelab-io/aegis/internal/infra/metrics"
-	"github.com/divinelab-io/aegis/internal/infra/storage"
-	"github.com/divinelab-io/aegis/internal/infra/telemetry"
-	"github.com/divinelab-io/aegis/internal/infra/transport"
-	"github.com/divinelab-io/aegis/internal/modules/captcha"
-	"github.com/divinelab-io/aegis/internal/rules"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/analytics"
+	"github.com/divinelabio/aegis/internal/app"
+	"github.com/divinelabio/aegis/internal/core/admin"
+	"github.com/divinelabio/aegis/internal/core/pipeline"
+	"github.com/divinelabio/aegis/internal/core/user"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/configstore"
+	"github.com/divinelabio/aegis/internal/infra/geoip"
+	"github.com/divinelabio/aegis/internal/infra/health"
+	"github.com/divinelabio/aegis/internal/infra/metrics"
+	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/telemetry"
+	"github.com/divinelabio/aegis/internal/infra/transport"
+	"github.com/divinelabio/aegis/internal/modules/captcha"
+	"github.com/divinelabio/aegis/internal/rules"
+	"github.com/divinelabio/aegis/internal/sections"
 	"github.com/quic-go/quic-go/http3"
 	"go.uber.org/zap"
 )
@@ -37,7 +37,7 @@ import (
 //
 //	-X main.Version=1.0.0 -X main.BuildDate=2025-01-01
 var (
-	Version   = "dev"
+	Version   = "1.0.1"
 	BuildDate = "unknown"
 
 	// CommercialInit is nil in Community builds. The Professional and
@@ -442,7 +442,7 @@ func main() {
 	logger.Info("Starting Aegis WAF", zap.Int("port", cfg.Server.Port))
 
 	unifiedMetrics := metrics.NewUnifiedCollector()
-	healthHandler := health.NewHandler("2.0.0")
+	healthHandler := health.NewHandler(Version)
 
 	geoConfig, err := cfg.GeoConfig()
 	if err != nil {

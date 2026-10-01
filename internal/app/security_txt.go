@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/config"
 )
 
 // SecurityTXTHandler serves the installation-wide vulnerability disclosure

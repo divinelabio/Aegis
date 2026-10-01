@@ -11,9 +11,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/divinelab-io/aegis/internal/infra/health"
-	"github.com/divinelab-io/aegis/internal/infra/metrics"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/infra/health"
+	"github.com/divinelabio/aegis/internal/infra/metrics"
+	"github.com/divinelabio/aegis/internal/sections"
 )
 
 // SectionManager manages all active security sections.

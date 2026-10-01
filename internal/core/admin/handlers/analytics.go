@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/analytics"
+	"github.com/divinelabio/aegis/internal/analytics"
 )
 
 func (h *Handler) HandleAnalytics(w http.ResponseWriter, r *http.Request) {

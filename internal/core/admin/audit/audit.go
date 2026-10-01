@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/core/user"
-	"github.com/divinelab-io/aegis/internal/infra/transport"
+	"github.com/divinelabio/aegis/internal/core/user"
+	"github.com/divinelabio/aegis/internal/infra/transport"
 	"github.com/alexedwards/scs/v2"
 	"github.com/google/uuid"
 	"go.uber.org/zap"

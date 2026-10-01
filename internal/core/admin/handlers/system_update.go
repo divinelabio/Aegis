@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/maintenance"
+	"github.com/divinelabio/aegis/internal/maintenance"
 	"go.uber.org/zap"
 	"golang.org/x/mod/semver"
 )
@@ -103,7 +103,7 @@ func (h *Handler) HandleSystemUpdateCheck(w http.ResponseWriter, r *http.Request
 				fmt.Sprintf("Upgrade ready to unlock %s features and enhancements.", strings.Title(string(snapshot.Upgrade.TargetTier))),
 				"Hot-applied without service disruption; configurations remain preserved.",
 			}
-			resp.ChangelogURL = "https://github.com/divinelab-io/aegis/releases"
+			resp.ChangelogURL = "https://github.com/divinelabio/aegis/releases"
 
 			cachedUpdateMu.Lock()
 			cachedUpdateResp = &resp
@@ -120,7 +120,7 @@ func (h *Handler) HandleSystemUpdateCheck(w http.ResponseWriter, r *http.Request
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
 
-	ghReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/divinelab-io/aegis/releases/latest", nil)
+	ghReq, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/divinelabio/aegis/releases/latest", nil)
 	if err == nil {
 		ghReq.Header.Set("Accept", "application/vnd.github.v3+json")
 		ghReq.Header.Set("User-Agent", "Aegis-Update-Checker/"+currentVer)

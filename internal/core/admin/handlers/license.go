@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/edition"
-	"github.com/divinelab-io/aegis/internal/licensing"
-	"github.com/divinelab-io/aegis/internal/maintenance"
+	"github.com/divinelabio/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/licensing"
+	"github.com/divinelabio/aegis/internal/maintenance"
 	"go.uber.org/zap"
 )
 

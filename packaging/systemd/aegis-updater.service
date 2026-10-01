@@ -1,6 +1,6 @@
 [Unit]
 Description=Aegis Maintenance and In-Place Upgrade Daemon
-Documentation=https://github.com/divinelab-io/aegis
+Documentation=https://github.com/divinelabio/aegis
 After=network.target
 
 [Service]

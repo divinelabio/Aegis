@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/sections"
 )
 
 const maxCommunityConfigBytes = 1 << 20

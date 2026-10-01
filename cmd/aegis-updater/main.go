@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/licensing"
-	"github.com/divinelab-io/aegis/internal/maintenance"
+	"github.com/divinelabio/aegis/internal/licensing"
+	"github.com/divinelabio/aegis/internal/maintenance"
 )
 
 var (
-	Version               = "dev"
+	Version               = "1.0.1"
 	BuildDate             = "unknown"
 	ArtifactRootPublicKey = ""
 	ArtifactSignedKeySet  = ""

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/divinelab-io/aegis/internal/infra/metrics"
+	"github.com/divinelabio/aegis/internal/infra/metrics"
 	"go.uber.org/zap"
 )
 

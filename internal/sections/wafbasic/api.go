@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
 	"github.com/google/uuid"
 )
 
@@ -540,8 +540,20 @@ func (s *Section) handleCRSRulesBulk(w http.ResponseWriter, r *http.Request) {
 }
 
 func allCRSFiles(root string) ([]string, error) {
-	if root == "" || root == "rules/crs" {
-		root = "data/rules/crs"
+	if root == "" || root == "rules/crs" || root == "data/rules/crs" {
+		if _, err := os.Stat("data/rules/crs"); err == nil {
+			root = "data/rules/crs"
+		} else if _, err := os.Stat("rules/crs"); err == nil {
+			root = "rules/crs"
+		} else {
+			root = "data/rules/crs"
+		}
+	} else if _, err := os.Stat(root); os.IsNotExist(err) {
+		if _, err := os.Stat("data/rules/crs"); err == nil {
+			root = "data/rules/crs"
+		} else if _, err := os.Stat("rules/crs"); err == nil {
+			root = "rules/crs"
+		}
 	}
 	files := []string{}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

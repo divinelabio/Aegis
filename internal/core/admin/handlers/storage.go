@@ -6,8 +6,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/storage"
 )
 
 const maxPostgreSQLPreflightRequestBytes = 16 << 10

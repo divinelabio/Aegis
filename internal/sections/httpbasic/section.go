@@ -21,8 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/transport"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/infra/transport"
+	"github.com/divinelabio/aegis/internal/sections"
 	"github.com/mitchellh/mapstructure"
 	"go.uber.org/zap"
 )

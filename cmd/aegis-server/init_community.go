@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/app"
-	"github.com/divinelab-io/aegis/internal/core/admin/handlers"
-	"github.com/divinelab-io/aegis/internal/edition"
-	"github.com/divinelab-io/aegis/internal/licensing"
+	"github.com/divinelabio/aegis/internal/app"
+	"github.com/divinelabio/aegis/internal/core/admin/handlers"
+	"github.com/divinelabio/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/licensing"
 	"go.uber.org/zap"
 )
 

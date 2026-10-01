@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/config"
 )
 
 // WriteConfiguredErrorPage writes an operator-authored error document only for

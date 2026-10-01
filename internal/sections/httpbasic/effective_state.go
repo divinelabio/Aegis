@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	infraConfig "github.com/divinelab-io/aegis/internal/infra/config"
+	infraConfig "github.com/divinelabio/aegis/internal/infra/config"
 )
 
 func (s *Section) handleEffectiveState(w http.ResponseWriter, r *http.Request) {

@@ -18,8 +18,8 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/sections"
 )
 
 const incompleteControlPlaneArchiveMessage = "configuration archive omits active PostgreSQL control-plane documents; use a PostgreSQL-consistent backup and recovery procedure"

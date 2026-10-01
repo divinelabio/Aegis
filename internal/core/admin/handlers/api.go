@@ -16,11 +16,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/divinelab-io/aegis/internal/edition"
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/infra/storage"
-	"github.com/divinelab-io/aegis/internal/infra/transport"
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/transport"
+	"github.com/divinelabio/aegis/internal/sections"
 	"github.com/google/uuid"
 )
 

@@ -1,4 +1,4 @@
-module github.com/divinelab-io/aegis
+module github.com/divinelabio/aegis
 
 go 1.25.0
 

@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
 	"github.com/oschwald/geoip2-golang"
 	"go.uber.org/zap"
 )

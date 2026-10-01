@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/storage"
 )
 
 func (h *Handler) HandleTrafficEvents(w http.ResponseWriter, r *http.Request) {

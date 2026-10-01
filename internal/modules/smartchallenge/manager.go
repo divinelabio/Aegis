@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
-	"github.com/divinelab-io/aegis/internal/modules/captcha"
-	"github.com/divinelab-io/aegis/internal/modules/fingerprint"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/modules/captcha"
+	"github.com/divinelabio/aegis/internal/modules/fingerprint"
 )
 
 // Config holds the module configuration

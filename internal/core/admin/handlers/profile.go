@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/divinelab-io/aegis/internal/core/user"
+	"github.com/divinelabio/aegis/internal/core/user"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )

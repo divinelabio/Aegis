@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/config"
 	"github.com/jackc/pgx/v5"
 )
 

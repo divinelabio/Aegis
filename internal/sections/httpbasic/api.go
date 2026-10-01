@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/sections"
 )
 
 func (s *Section) registerFunctionToggle(mux *http.ServeMux, prefix string) {

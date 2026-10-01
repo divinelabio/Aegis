@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
 )
 
 type RuleType string

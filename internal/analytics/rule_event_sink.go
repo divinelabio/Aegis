@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/rules"
+	"github.com/divinelabio/aegis/internal/rules"
 	"go.uber.org/zap"
 )
 

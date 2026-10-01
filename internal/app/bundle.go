@@ -2,17 +2,17 @@
 package app
 
 import (
-	"github.com/divinelab-io/aegis/internal/analytics"
-	"github.com/divinelab-io/aegis/internal/edition"
-	"github.com/divinelab-io/aegis/internal/infra/geoip"
-	"github.com/divinelab-io/aegis/internal/infra/metrics"
-	"github.com/divinelab-io/aegis/internal/infra/transport"
-	"github.com/divinelab-io/aegis/internal/licensing"
-	"github.com/divinelab-io/aegis/internal/rules"
-	"github.com/divinelab-io/aegis/internal/sections"
-	"github.com/divinelab-io/aegis/internal/sections/httpbasic"
-	"github.com/divinelab-io/aegis/internal/sections/trafficbasic"
-	"github.com/divinelab-io/aegis/internal/sections/wafbasic"
+	"github.com/divinelabio/aegis/internal/analytics"
+	"github.com/divinelabio/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/infra/geoip"
+	"github.com/divinelabio/aegis/internal/infra/metrics"
+	"github.com/divinelabio/aegis/internal/infra/transport"
+	"github.com/divinelabio/aegis/internal/licensing"
+	"github.com/divinelabio/aegis/internal/rules"
+	"github.com/divinelabio/aegis/internal/sections"
+	"github.com/divinelabio/aegis/internal/sections/httpbasic"
+	"github.com/divinelabio/aegis/internal/sections/trafficbasic"
+	"github.com/divinelabio/aegis/internal/sections/wafbasic"
 	"go.uber.org/zap"
 )
 

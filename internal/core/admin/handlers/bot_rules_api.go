@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/analytics"
-	"github.com/divinelab-io/aegis/internal/rules"
+	"github.com/divinelabio/aegis/internal/analytics"
+	"github.com/divinelabio/aegis/internal/rules"
 )
 
 const maxV2BotRulesBody = 256 << 10

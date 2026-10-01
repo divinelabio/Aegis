@@ -11,11 +11,11 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/divinelab-io/aegis/internal/analytics"
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/infra/metrics"
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
-	"github.com/divinelab-io/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/analytics"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/infra/metrics"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/storage"
 )
 
 type key int

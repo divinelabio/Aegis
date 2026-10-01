@@ -18,13 +18,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/config"
-	"github.com/divinelab-io/aegis/internal/maintenance"
-	"github.com/divinelab-io/aegis/internal/operatorcli"
+	"github.com/divinelabio/aegis/internal/infra/config"
+	"github.com/divinelabio/aegis/internal/maintenance"
+	"github.com/divinelabio/aegis/internal/operatorcli"
 )
 
 var (
-	Version   = "dev"
+	Version   = "1.0.1"
 	BuildDate = "unknown"
 )
 

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/divinelab-io/aegis/internal/app"
+	"github.com/divinelabio/aegis/internal/app"
 )
 
 func (h *Handler) HandleCommandCenter(w http.ResponseWriter, r *http.Request) {

@@ -2,10 +2,10 @@
 
 .PHONY: run build clean docker-build updater admin-build admin-typecheck admin-verify
 
-VERSION ?= dev
+VERSION ?= 1.0.1
 BUILD_DATE ?= unknown
 BUILD_TAGS ?=
-LDFLAGS = -s -w -X github.com/divinelab-io/aegis/internal/core/admin.Version=$(VERSION) -X github.com/divinelab-io/aegis/internal/core/admin.BuildDate=$(BUILD_DATE) -X main.Version=$(VERSION) -X main.BuildDate=$(BUILD_DATE)
+LDFLAGS = -s -w -X github.com/divinelabio/aegis/internal/core/admin.Version=$(VERSION) -X github.com/divinelabio/aegis/internal/core/admin.BuildDate=$(BUILD_DATE) -X main.Version=$(VERSION) -X main.BuildDate=$(BUILD_DATE)
 
 build:
 	mkdir -p bin

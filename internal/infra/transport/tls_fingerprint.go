@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
 )
 
 const (

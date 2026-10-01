@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"github.com/divinelab-io/aegis/internal/edition"
-	"github.com/divinelab-io/aegis/internal/licensing"
+	"github.com/divinelabio/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/licensing"
 )
 
 // currentLicenseSnapshot is the sole admin-side source for plan data. It

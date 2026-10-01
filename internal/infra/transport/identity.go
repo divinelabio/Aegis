@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
 )
 
 type GeoResolver interface {

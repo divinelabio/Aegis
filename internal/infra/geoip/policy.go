@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/divinelab-io/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
 )
 
 var RegionCountries = map[string][]string{

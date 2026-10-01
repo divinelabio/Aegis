@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/edition"
 )
 
 type Config struct {

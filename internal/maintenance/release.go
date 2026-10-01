@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/divinelab-io/aegis/internal/edition"
+	"github.com/divinelabio/aegis/internal/edition"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/mod/semver"
 )
