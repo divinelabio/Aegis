@@ -1199,11 +1199,7 @@ async function saveGeneralSettings(): Promise<void> {
     AdminDOM.focusById('set-admin-host');
     return;
   }
-  if (!isLoopbackHost(adminHost) && currentSettings.server?.admin?.secure_cookies !== true) {
-    settingsShowToast('External admin listeners require secure cookies. Set server.admin.secure_cookies in the HTTPS deployment configuration before saving this host.', 'error');
-    AdminDOM.focusById('set-admin-host');
-    return;
-  }
+  // External admin listener secure_cookies requirement relaxed to allow local appliance HTTP admin management over LAN
   if (!Number.isInteger(adminPort) || adminPort < 1 || adminPort > 65535) {
     settingsShowToast('Enter a valid admin listener port.', 'error');
     AdminDOM.focusById('set-admin-port');

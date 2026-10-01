@@ -163,6 +163,21 @@ async function submitLoginFlow(button) {
             return true;
         }
         if (response.ok) {
+            try {
+                const verifyRes = await fetch('/api/verify_session', { headers: { Accept: 'application/json' } });
+                if (!verifyRes.ok) {
+                    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                        showError('Login succeeded, but the browser rejected the session cookie. This occurs when accessing via HTTP while secure_cookies is enabled. Please access via HTTPS or set server.admin.secure_cookies to false in /etc/aegis/config.yaml.');
+                    } else {
+                        showError('Session verification failed. Please check cookie permissions in your browser.');
+                    }
+                    setSubmitState(button, false, 'Sign In');
+                    return false;
+                }
+            } catch {
+                // Proceed if verify endpoint check network fails
+            }
+
             Toast.show('Login successful. Redirecting...', 'success');
             const redirectTarget = resolveRedirectPath();
             window.setTimeout(() => {

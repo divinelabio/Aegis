@@ -446,7 +446,20 @@ export const api: ApiClient = {
         body: JSON.stringify({ username, password })
       });
 
-      if (response.ok) return { success: true };
+      if (response.ok) {
+        try {
+          const verify = await fetch('/api/verify_session', { headers: { Accept: 'application/json' } });
+          if (!verify.ok) {
+            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+              return { success: false, error: 'Browser rejected the session cookie. This happens on HTTP when secure_cookies is enabled. Access via HTTPS or disable secure_cookies in config.' };
+            }
+            return { success: false, error: 'Session cookie was rejected by your browser.' };
+          }
+        } catch {
+          // ignore network error
+        }
+        return { success: true };
+      }
       return { success: false, error: 'Invalid credentials' };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Login failed') };
