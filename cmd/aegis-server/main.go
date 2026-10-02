@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"github.com/divinelabio/aegis/internal/analytics"
 	"github.com/divinelabio/aegis/internal/app"
 	"github.com/divinelabio/aegis/internal/core/admin"
+	"github.com/divinelabio/aegis/internal/core/admin/handlers"
 	"github.com/divinelabio/aegis/internal/core/pipeline"
 	"github.com/divinelabio/aegis/internal/core/user"
 	"github.com/divinelabio/aegis/internal/infra/config"
@@ -127,6 +129,10 @@ func parseCLI(args []string) (command string, configPath string, envPath string,
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--build-info" {
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"version": Version, "build_tier": string(app.DefaultBundle().CompiledTier()), "build_date": BuildDate})
+		return
+	}
 	cmd, configPath, envPath, err := parseCLI(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aegis: %v\n", err)
@@ -443,6 +449,14 @@ func main() {
 
 	unifiedMetrics := metrics.NewUnifiedCollector()
 	healthHandler := health.NewHandler(Version)
+	healthHandler.Licensing = func() (string, string) {
+		build := string(app.DefaultBundle().CompiledTier())
+		manager := handlers.GetLicenseManager()
+		if manager == nil {
+			return build, "community"
+		}
+		return build, string(manager.Snapshot().EffectiveTier)
+	}
 
 	geoConfig, err := cfg.GeoConfig()
 	if err != nil {
@@ -467,12 +481,12 @@ func main() {
 	router := transport.NewRouter(cfg.Upstream.Rules)
 	bundle := app.DefaultBundle()
 	sectionMgr, err := app.NewSectionManager(bundle, logger, unifiedMetrics, app.BundleDependencies{
-		Logger:               logger,
-		Metrics:              unifiedMetrics,
-		Geo:                  geoService,
-		RuleStore:            ruleStore,
-		AnalyticsStore:       analyticsStore,
-		Router:               router,
+		Logger:         logger,
+		Metrics:        unifiedMetrics,
+		Geo:            geoService,
+		RuleStore:      ruleStore,
+		AnalyticsStore: analyticsStore,
+		Router:         router,
 		PersistSectionConfig: func(sectionID string, sectionConfig sections.SectionConfig) error {
 			if sectionID == "traffic_control" {
 				actor := "system:admin"

@@ -12,7 +12,10 @@ export function showLicenseCongratulationsModal(tier, details) {
     const normalizedTier = (tier || 'professional').toLowerCase();
     const isEnterprise = normalizedTier.includes('enterprise');
     const tierName = isEnterprise ? 'Enterprise' : 'Professional';
-    const subtitleText = `Aegis ${tierName} Edition is now active and protecting your workloads.`;
+    const isUpgradeRequired = (details?.status || '').toLowerCase() === 'upgrade_required';
+    const subtitleText = isUpgradeRequired
+        ? `Aegis ${tierName} license validated. Upgrade ready to enable all ${tierName} capabilities.`
+        : `Aegis ${tierName} Edition is now active and protecting your workloads.`;
     // Exact commercial capabilities (OWASP CRS is free/community, so omitted; no buzzwords/ML)
     const capabilities = isEnterprise ? [
         {
@@ -100,12 +103,28 @@ export function showLicenseCongratulationsModal(tier, details) {
       </div>
 
       <!-- Action Button -->
-      <button type="button" class="btn btn-primary" data-section-action="close-modal" style="width: 100%; padding: 11px 16px; font-size: 0.92rem; font-weight: 600; border-radius: 6px; cursor: pointer;">
-        Go to Console
+      <button type="button" class="btn btn-primary" id="license-modal-action-btn" data-section-action="close-modal" style="width: 100%; padding: 11px 16px; font-size: 0.92rem; font-weight: 600; border-radius: 6px; cursor: pointer;">
+        ${isUpgradeRequired ? 'Review &amp; Apply Upgrade' : 'Go to Console'}
       </button>
     </div>
   `;
     SectionUI.showModal(content, { panelClass: 'modal-content license-modal-panel', closeOnBackdrop: true });
+    if (isUpgradeRequired) {
+        const actionBtn = document.getElementById('license-modal-action-btn');
+        if (actionBtn) {
+            actionBtn.addEventListener('click', () => {
+                SectionUI.closeModal();
+                import('./system-update.js').then(({ checkSystemUpdates, openSystemUpdateModal }) => {
+                    void checkSystemUpdates(true).then(status => {
+                        if (status)
+                            openSystemUpdateModal(status);
+                        else
+                            openSystemUpdateModal();
+                    });
+                });
+            });
+        }
+    }
 }
 /**
  * Displays an understated, clear modal when license activation fails.

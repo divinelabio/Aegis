@@ -44,10 +44,11 @@ func StaticTrustedKeys(values map[string]string) (map[string]ed25519.PublicKey, 
 }
 
 type RuntimeManager struct {
-	config   Config
-	identity installationIdentity
-	client   *apiClient
-	verifier verifier
+	operationMu sync.Mutex
+	config      Config
+	identity    installationIdentity
+	client      *apiClient
+	verifier    verifier
 
 	stateMu sync.Mutex
 	state   persistedState
@@ -70,7 +71,7 @@ func NewManager(config Config) (*RuntimeManager, error) {
 		config.Audience = "aegis-runtime"
 	}
 	if config.RefreshInterval <= 0 {
-		config.RefreshInterval = 6 * time.Hour
+		config.RefreshInterval = 5 * time.Minute
 	}
 	if config.Clock == nil {
 		config.Clock = time.Now
@@ -107,7 +108,8 @@ func NewManager(config Config) (*RuntimeManager, error) {
 		return manager, nil
 	}
 	if state.Entitlement != "" {
-		if err := manager.applyEntitlement(state.Entitlement, state.LastServerTime, UpgradeInfo{}); err != nil {
+		upgrade, _ := manager.upgradeFromResponse(apiResponse{TargetTier: state.Upgrade.TargetTier, TargetVersion: state.Upgrade.TargetVersion, ArtifactManifest: state.Upgrade.Manifest})
+		if err := manager.applyEntitlement(state.Entitlement, state.LastServerTime, upgrade); err != nil {
 			snapshot := manager.communitySnapshot()
 			snapshot.Status = StatusInvalid
 			snapshot.LastError = err.Error()
@@ -124,13 +126,22 @@ func NewManager(config Config) (*RuntimeManager, error) {
 
 func (m *RuntimeManager) Snapshot() Snapshot {
 	snapshot := m.current.Load().(Snapshot)
+	if !snapshot.OfflineUntil.IsZero() && !m.config.Clock().Before(snapshot.OfflineUntil) {
+		snapshot.Status = StatusExpired
+		snapshot.EffectiveTier = edition.CommunityTier
+		snapshot.effective = edition.Intersect(m.config.CompiledFeatures, edition.FeaturesForTier(edition.CommunityTier))
+		snapshot.Features = snapshot.effective.Sorted()
+		snapshot.Upgrade = UpgradeInfo{}
+	} else if !snapshot.ExpiresAt.IsZero() && !m.config.Clock().Before(snapshot.ExpiresAt) && snapshot.Status == StatusActive {
+		snapshot.Status = StatusGrace
+	}
 	snapshot.Features = append([]edition.FeatureID(nil), snapshot.Features...)
 	snapshot.effective = snapshot.effective.Clone()
 	return snapshot
 }
 
 func (m *RuntimeManager) Has(feature edition.FeatureID) bool {
-	return m.current.Load().(Snapshot).Has(feature)
+	return m.Snapshot().Has(feature)
 }
 
 func (m *RuntimeManager) Subscribe() <-chan Snapshot {
@@ -143,6 +154,21 @@ func (m *RuntimeManager) Subscribe() <-chan Snapshot {
 }
 
 func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationResult, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	previous := m.Snapshot()
+	committed := false
+	defer func() {
+		if !committed {
+			m.publish(previous)
+		}
+	}()
+	m.stateMu.Lock()
+	oldActivation := m.state.ActivationID
+	m.stateMu.Unlock()
+	if oldActivation != "" {
+		return ActivationResult{}, errors.New("this installation is already activated; refresh it or deactivate it before changing the licence key")
+	}
 	if m.client == nil {
 		return ActivationResult{}, errors.New("licence activation service is not configured")
 	}
@@ -189,6 +215,7 @@ func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationRe
 		LastServerTime: response.ServerTime.UTC(),
 		LastObservedAt: now,
 		LastRefresh:    now,
+		Upgrade:        storedUpgrade{TargetTier: string(upgrade.TargetTier), TargetVersion: upgrade.TargetVersion, Manifest: upgrade.Manifest},
 	}
 	if err := savePersistedState(m.config.StateDir, candidate); err != nil {
 		return ActivationResult{}, err
@@ -197,10 +224,22 @@ func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationRe
 	m.state = candidate
 	m.stateMu.Unlock()
 	m.publish(snapshot)
+	committed = true
 	return ActivationResult{Snapshot: m.Snapshot(), Upgrade: upgrade}, nil
 }
 
 func (m *RuntimeManager) Refresh(ctx context.Context) error {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	return m.refresh(ctx)
+}
+
+func (m *RuntimeManager) refresh(ctx context.Context) (operationErr error) {
+	defer func() {
+		if operationErr != nil {
+			m.recalculateCached(operationErr.Error())
+		}
+	}()
 	if m.client == nil {
 		return errors.New("licence activation service is not configured")
 	}
@@ -223,7 +262,6 @@ func (m *RuntimeManager) Refresh(ctx context.Context) error {
 		Nonce:          nonce,
 	}, m.identity.PrivateKey)
 	if err != nil {
-		m.recalculateCached(err.Error())
 		return err
 	}
 	if response.ActivationID != "" && response.ActivationID != activationID {
@@ -246,6 +284,7 @@ func (m *RuntimeManager) Refresh(ctx context.Context) error {
 	candidate.LastServerTime = response.ServerTime.UTC()
 	candidate.LastObservedAt = now
 	candidate.LastRefresh = now
+	candidate.Upgrade = storedUpgrade{TargetTier: string(upgrade.TargetTier), TargetVersion: upgrade.TargetVersion, Manifest: upgrade.Manifest}
 	if err := savePersistedState(m.config.StateDir, candidate); err != nil {
 		return err
 	}
@@ -257,6 +296,8 @@ func (m *RuntimeManager) Refresh(ctx context.Context) error {
 }
 
 func (m *RuntimeManager) Deactivate(ctx context.Context) error {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	if m.client == nil {
 		return errors.New("licence activation service is not configured")
 	}
@@ -282,23 +323,47 @@ func (m *RuntimeManager) Deactivate(ctx context.Context) error {
 		m.publish(m.withStatus(StatusDeactivationPending, err.Error()))
 		return err
 	}
-	m.stateMu.Lock()
-	m.state = persistedState{}
-	m.stateMu.Unlock()
 	if err := clearPersistedState(m.config.StateDir); err != nil {
 		return err
 	}
+	m.stateMu.Lock()
+	m.state = persistedState{}
+	m.stateMu.Unlock()
 	m.publish(m.communitySnapshot())
 	return nil
 }
 
 func (m *RuntimeManager) Start(ctx context.Context) {
+	// Subscribers must see deadline transitions even when the authority is offline.
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.operationMu.Lock()
+				previous := m.current.Load().(Snapshot)
+				next := m.Snapshot()
+				if previous.Status != next.Status || previous.EffectiveTier != next.EffectiveTier {
+					m.publish(next)
+				}
+				m.operationMu.Unlock()
+			}
+		}
+	}()
 	if m.client == nil {
 		return
 	}
 	go func() {
+		// Reconcile immediately after startup. A persisted entitlement remains
+		// usable offline, but release metadata must not wait hours to recover.
+		refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		_ = m.Refresh(refreshCtx)
+		cancel()
 		for {
-			jitter := time.Duration(rand.Int63n(int64(m.config.RefreshInterval / 5)))
+			jitter := time.Duration(rand.Int63n(max(1, int64(m.config.RefreshInterval/5))))
 			timer := time.NewTimer(m.config.RefreshInterval + jitter)
 			select {
 			case <-ctx.Done():
@@ -350,11 +415,14 @@ func (m *RuntimeManager) entitlementSnapshot(raw string, serverTime, previousSer
 		status = StatusActive
 	}
 	paidAllowed := status != StatusSuspended && status != StatusRevoked && status != StatusExpired && status != StatusInvalid
-	if now.After(claims.OfflineUntil.Time) {
+	if !now.Before(claims.OfflineUntil.Time) {
 		status = StatusExpired
 		paidAllowed = false
 	} else if now.After(claims.ExpiresAt.Time) && paidAllowed {
 		status = StatusGrace
+	}
+	if !paidAllowed {
+		upgrade = UpgradeInfo{}
 	}
 
 	entitled := edition.FeaturesForTier(edition.CommunityTier)
@@ -386,6 +454,7 @@ func (m *RuntimeManager) entitlementSnapshot(raw string, serverTime, previousSer
 		LastRefresh:   lastRefresh,
 		Upgrade:       upgrade,
 		effective:     effective,
+		clock:         m.config.Clock,
 	}
 	if claims.SubscriptionEnd != nil {
 		snapshot.SubscriptionEnd = claims.SubscriptionEnd.Time
@@ -502,7 +571,12 @@ func (m *RuntimeManager) upgradeFromResponse(response apiResponse) (UpgradeInfo,
 
 	upgrade.Required = isTierUpgrade || (tier.Rank() == m.config.CompiledTier.Rank() && isVersionUpgrade)
 	if upgrade.Required {
-		upgrade.State = "ready"
+		upgrade.State = "unavailable"
+		upgrade.Reason = "No compatible release is available for this installation. Refresh after the release is published."
+		if upgrade.Manifest != "" && semver.IsValid(normalizeVersion(upgrade.TargetVersion)) &&
+			(!semver.IsValid(normalizeVersion(m.config.Version)) || semver.Compare(normalizeVersion(upgrade.TargetVersion), normalizeVersion(m.config.Version)) >= 0) {
+			upgrade.State, upgrade.Available, upgrade.Reason = "ready", true, ""
+		}
 	}
 	return upgrade, nil
 }

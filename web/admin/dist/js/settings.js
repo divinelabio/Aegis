@@ -1613,7 +1613,14 @@ function notifyLicenseChanged() {
     document.dispatchEvent(new CustomEvent('aegis:license-changed'));
 }
 async function applyUpgrade() {
-    openSystemUpdateModal();
+    notify('Loading upgrade details...', 'info');
+    const status = await checkSystemUpdates(true);
+    if (status) {
+        openSystemUpdateModal(status);
+    }
+    else {
+        openSystemUpdateModal();
+    }
 }
 async function handleCheckSystemUpdate() {
     notify('Checking for software updates...', 'info');
@@ -1652,6 +1659,7 @@ async function activateLicense() {
         currentLicense = res.data.license;
         renderLicensePanel();
         notifyLicenseChanged();
+        void checkSystemUpdates(true);
         showLicenseCongratulationsModal(res.data.license.licensed_tier || res.data.license.effective_tier || 'professional', {
             expiresAt: res.data.license.expires_at,
             offlineUntil: res.data.license.offline_until,
@@ -1675,6 +1683,7 @@ async function refreshLicense() {
         currentLicense = snapshot;
         renderLicensePanel();
         notifyLicenseChanged();
+        void checkSystemUpdates(true);
         settingsShowToast('Licence refreshed', 'success');
     }
     finally {
@@ -1694,6 +1703,7 @@ function deactivateLicense() {
             currentLicense = snapshot;
             renderLicensePanel();
             notifyLicenseChanged();
+            void checkSystemUpdates(true);
             settingsShowToast('Installation deactivated', 'success');
         }
         finally {

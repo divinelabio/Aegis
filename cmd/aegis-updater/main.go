@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/divinelabio/aegis/internal/buildinfo"
 	"github.com/divinelabio/aegis/internal/licensing"
 	"github.com/divinelabio/aegis/internal/maintenance"
 )
@@ -17,9 +18,9 @@ import (
 var (
 	Version               = "1.0.1"
 	BuildDate             = "unknown"
-	ArtifactRootPublicKey = ""
-	ArtifactSignedKeySet  = ""
-	ArtifactIssuer        = "https://license.aegis.invalid"
+	ArtifactRootPublicKey = buildinfo.RootPublicKey
+	ArtifactSignedKeySet  = buildinfo.SignedKeySet
+	ArtifactIssuer        = buildinfo.LicenseIssuer
 	ArtifactAudience      = "aegis-updater"
 )
 
@@ -29,6 +30,10 @@ func main() {
 		os.Exit(2)
 	}
 	command := os.Args[1]
+	if command == "version" {
+		fmt.Printf("aegis-updater %s (%s)\n", Version, BuildDate)
+		return
+	}
 	flags := flag.NewFlagSet(command, flag.ExitOnError)
 	configPath := flags.String("config", "config.yaml", "path to Aegis configuration")
 	manifestPath := flags.String("manifest-file", "", "signed artifact manifest file")

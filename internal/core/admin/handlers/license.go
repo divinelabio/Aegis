@@ -58,12 +58,14 @@ func (h *Handler) HandleLicenseAction(w http.ResponseWriter, r *http.Request) {
 			h.writeLicenseManagerError(w, err)
 			return
 		}
+		InvalidateUpdateCache()
 		writeLicenseJSON(w, http.StatusOK, h.License.Snapshot())
 	case "deactivate":
 		if err := h.License.Deactivate(r.Context()); err != nil {
 			h.writeLicenseManagerError(w, err)
 			return
 		}
+		InvalidateUpdateCache()
 		writeLicenseJSON(w, http.StatusOK, h.License.Snapshot())
 	case "upgrade":
 		h.handleLicenseUpgrade(w, r)
@@ -156,6 +158,7 @@ func (h *Handler) handleLicenseActivate(w http.ResponseWriter, r *http.Request) 
 		h.writeLicenseManagerError(w, err)
 		return
 	}
+	InvalidateUpdateCache()
 	writeLicenseJSON(w, http.StatusOK, result)
 }
 

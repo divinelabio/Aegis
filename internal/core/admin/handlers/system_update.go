@@ -25,7 +25,10 @@ type UpdateStatusResponse struct {
 	Highlights        []string `json:"highlights,omitempty"`
 	DownloadURL       string   `json:"download_url,omitempty"`
 	ChangelogURL      string   `json:"changelog_url,omitempty"`
-	Channel           string   `json:"channel"` // "community", "professional", "enterprise"
+	Channel           string   `json:"channel"`                   // Target tier: "community", "professional", "enterprise"
+	CurrentChannel    string   `json:"current_channel,omitempty"` // Current running tier: "community", "professional", "enterprise"
+	TargetTier        string   `json:"target_tier,omitempty"`
+	IsTierUpgrade     bool     `json:"is_tier_upgrade"`
 	CheckedAt         string   `json:"checked_at"`
 	UpdaterConfigured bool     `json:"updater_configured"`
 	Error             string   `json:"error,omitempty"`
@@ -38,6 +41,15 @@ var (
 )
 
 const updateCacheTTL = 1 * time.Hour
+
+// InvalidateUpdateCache clears any cached system update checks so subsequent
+// calls will re-evaluate against active licensing state and GitHub.
+func InvalidateUpdateCache() {
+	cachedUpdateMu.Lock()
+	cachedUpdateResp = nil
+	cachedUpdateAt = time.Time{}
+	cachedUpdateMu.Unlock()
+}
 
 func normalizeSemver(v string) string {
 	v = strings.TrimSpace(v)
@@ -53,8 +65,21 @@ func normalizeSemver(v string) string {
 // HandleSystemUpdateCheck inspects the current installation and checks whether a newer
 // version is available (from the commercial licensing backend or community release catalog).
 func (h *Handler) HandleSystemUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		h.JSONError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	force := r.URL.Query().Get("force") == "true"
+	if force && h.License != nil && h.License.Snapshot().ActivationID != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		err := h.License.Refresh(ctx)
+		cancel()
+		if err != nil && h.Logger != nil {
+			h.Logger.Warn("Licence refresh during update check failed", zap.Error(err))
+		}
+	}
 
 	cachedUpdateMu.RLock()
 	if !force && cachedUpdateResp != nil && time.Since(cachedUpdateAt) < updateCacheTTL {
@@ -79,36 +104,66 @@ func (h *Handler) HandleSystemUpdateCheck(w http.ResponseWriter, r *http.Request
 	resp := UpdateStatusResponse{
 		CurrentVersion:    currentVer,
 		LatestVersion:     currentVer,
+		CurrentChannel:    channel,
+		Channel:           channel,
 		UpdateAvailable:   false,
 		Notify:            false,
 		Severity:          "recommended",
-		Channel:           channel,
 		CheckedAt:         time.Now().UTC().Format(time.RFC3339),
 		UpdaterConfigured: strings.TrimSpace(h.UpdaterSocket) != "",
+	}
+	if resp.UpdaterConfigured {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		_, err := maintenance.CallUpdater(ctx, h.UpdaterSocket, maintenance.UpdaterRequest{Operation: "status"})
+		cancel()
+		resp.UpdaterConfigured = err == nil
 	}
 
 	// 1. Check Commercial upgrade if license manager is active
 	if h.License != nil {
 		snapshot := h.License.Snapshot()
-		if snapshot.EffectiveTier != "" {
-			resp.Channel = string(snapshot.EffectiveTier)
+		if snapshot.BuildTier != "" {
+			resp.CurrentChannel = string(snapshot.BuildTier)
+			resp.Channel = string(snapshot.BuildTier)
 		}
-		if snapshot.Upgrade.Required && snapshot.Upgrade.TargetVersion != "" {
-			resp.LatestVersion = snapshot.Upgrade.TargetVersion
-			resp.UpdateAvailable = true
-			resp.Notify = true
+
+		isTierUpgrade := snapshot.Upgrade.TargetTier.Rank() > snapshot.BuildTier.Rank()
+		isUpgradePending := snapshot.Upgrade.Required
+
+		if isUpgradePending {
+			targetTier := string(snapshot.Upgrade.TargetTier)
+			if targetTier == "" {
+				targetTier = string(snapshot.LicensedTier)
+			}
+			if targetTier == "" {
+				targetTier = "professional"
+			}
+			resp.Channel = targetTier
+			resp.TargetTier = targetTier
+			resp.IsTierUpgrade = isTierUpgrade
+
+			targetVer := strings.TrimSpace(snapshot.Upgrade.TargetVersion)
+			if targetVer == "" {
+				targetVer = currentVer
+			}
+			resp.LatestVersion = targetVer
+			resp.UpdateAvailable = snapshot.Upgrade.Available
+			resp.Notify = snapshot.Upgrade.Available
+			resp.Error = snapshot.Upgrade.Reason
 			resp.Severity = "recommended"
-			if snapshot.Upgrade.TargetTier.Rank() > snapshot.EffectiveTier.Rank() {
-				resp.Title = fmt.Sprintf("Aegis %s Upgrade", strings.Title(string(snapshot.Upgrade.TargetTier)))
+
+			if isTierUpgrade {
+				resp.Title = fmt.Sprintf("Aegis %s Upgrade", strings.Title(targetTier))
 				resp.Highlights = []string{
-					fmt.Sprintf("Upgrade ready to unlock %s features and enhancements.", strings.Title(string(snapshot.Upgrade.TargetTier))),
-					"Hot-applied without service disruption; configurations remain preserved.",
+					fmt.Sprintf("Upgrade ready to unlock %s features and capabilities.", strings.Title(targetTier)),
+					"Aegis restarts briefly during installation; configurations remain preserved.",
+					"Custom WAF rules, SSL certificates, and threat data are preserved.",
 				}
 			} else {
-				resp.Title = fmt.Sprintf("Aegis %s Update %s", strings.Title(string(snapshot.EffectiveTier)), snapshot.Upgrade.TargetVersion)
+				resp.Title = fmt.Sprintf("Aegis %s Update %s", strings.Title(string(snapshot.EffectiveTier)), targetVer)
 				resp.Highlights = []string{
-					fmt.Sprintf("Hot-patch release %s ready for Aegis %s.", snapshot.Upgrade.TargetVersion, strings.Title(string(snapshot.EffectiveTier))),
-					"Hot-applied without service disruption; configurations remain preserved.",
+					fmt.Sprintf("Hot-patch release %s ready for Aegis %s.", targetVer, strings.Title(string(snapshot.EffectiveTier))),
+					"Aegis restarts briefly during installation; configurations remain preserved.",
 				}
 			}
 			resp.ChangelogURL = "https://github.com/divinelabio/aegis/releases"
@@ -205,6 +260,11 @@ func (h *Handler) HandleSystemUpdateCheck(w http.ResponseWriter, r *http.Request
 
 // HandleSystemUpdateApply sends an upgrade instruction to the local aegis-updater daemon.
 func (h *Handler) HandleSystemUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		h.JSONError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 
 	if strings.TrimSpace(h.UpdaterSocket) == "" {
@@ -212,41 +272,32 @@ func (h *Handler) HandleSystemUpdateApply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var req struct {
-		Version string `json:"version"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-
-	// If a commercial license snapshot has upgrade details, pass them
-	manifest := ""
-	credential := ""
-	if h.License != nil {
-		snapshot := h.License.Snapshot()
-		if snapshot.Upgrade.Manifest != "" {
-			manifest = snapshot.Upgrade.Manifest
-			credential = snapshot.Upgrade.Credential
-		}
-	}
-
-	manifest = strings.TrimSpace(manifest)
-	if manifest == "" {
-		if h.License == nil {
-			h.JSONError(w, "In-place automated updater (aegis-updater) requires a signed commercial release manifest. For Aegis Community edition, please upgrade by pulling the updated container image (e.g. 'docker compose pull && docker compose up -d') or downloading the latest release binary from https://github.com/divinelabio/aegis/releases.", http.StatusBadRequest)
-		} else {
-			h.JSONError(w, "No signed artifact manifest is currently available for this update. Verify that the release artifact has been published in the licensing portal or contact support.", http.StatusBadRequest)
-		}
+	if h.License == nil || h.License.Snapshot().ActivationID == "" {
+		h.JSONError(w, "Activate a commercial licence before requesting a commercial release.", http.StatusConflict)
 		return
 	}
-
-	if parts := strings.Split(manifest, "."); len(parts) != 3 {
-		h.JSONError(w, "Artifact manifest is not a valid signed JWT (expected 3 dot-separated segments). Please verify the published artifact in the licensing repository.", http.StatusBadRequest)
+	// Always obtain the release from this installation's current entitlement.
+	// Caller-supplied manifests cannot select a different paid edition.
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	if err := h.License.Refresh(ctx); err != nil {
+		h.writeLicenseManagerError(w, err)
+		return
+	}
+	upgrade := h.License.Snapshot().Upgrade
+	if !upgrade.Required || !upgrade.Available || upgrade.Manifest == "" {
+		message := upgrade.Reason
+		if message == "" {
+			message = "No compatible commercial upgrade is pending for this installation."
+		}
+		h.JSONError(w, message, http.StatusConflict)
 		return
 	}
 
 	resp, err := maintenance.CallUpdater(r.Context(), h.UpdaterSocket, maintenance.UpdaterRequest{
 		Operation:  "upgrade",
-		Manifest:   manifest,
-		Credential: credential,
+		Manifest:   upgrade.Manifest,
+		Credential: upgrade.Credential,
 	})
 	if err != nil {
 		if h.Logger != nil {
@@ -256,9 +307,10 @@ func (h *Handler) HandleSystemUpdateApply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
-		"message": "Update dispatched to aegis-updater. Aegis is restarting...",
+		"message": "Upgrade queued. Follow the updater job for installation and restart progress.",
 		"status":  resp.Status,
 	})
 }

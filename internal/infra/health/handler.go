@@ -27,12 +27,14 @@ type Check struct {
 
 // Response is the health check response
 type Response struct {
-	Status    Status                 `json:"status"`
-	Timestamp string                 `json:"timestamp"`
-	Uptime    string                 `json:"uptime"`
-	Version   string                 `json:"version,omitempty"`
-	Checks    []Check                `json:"checks,omitempty"`
-	System    map[string]interface{} `json:"system,omitempty"`
+	Status        Status                 `json:"status"`
+	Timestamp     string                 `json:"timestamp"`
+	Uptime        string                 `json:"uptime"`
+	BuildTier     string                 `json:"build_tier"`
+	EffectiveTier string                 `json:"effective_tier"`
+	Version       string                 `json:"version,omitempty"`
+	Checks        []Check                `json:"checks,omitempty"`
+	System        map[string]interface{} `json:"system,omitempty"`
 }
 
 // Handler provides health check endpoints
@@ -41,6 +43,7 @@ type Handler struct {
 	version   string
 	checks    []func() Check
 	ready     atomic.Bool
+	Licensing func() (string, string)
 }
 
 // NewHandler creates a new health check handler
@@ -119,6 +122,10 @@ func (h *Handler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 			"os":         runtime.GOOS,
 			"arch":       runtime.GOARCH,
 		},
+	}
+
+	if h.Licensing != nil {
+		resp.BuildTier, resp.EffectiveTier = h.Licensing()
 	}
 
 	// Set status code based on health

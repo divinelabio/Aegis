@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,19 +32,60 @@ type identityFile struct {
 }
 
 type persistedState struct {
-	ActivationID   string    `json:"activation_id,omitempty"`
-	Entitlement    string    `json:"entitlement,omitempty"`
-	LastServerTime time.Time `json:"last_server_time,omitempty"`
-	LastObservedAt time.Time `json:"last_observed_at,omitempty"`
-	LastRefresh    time.Time `json:"last_refresh,omitempty"`
+	ActivationID   string        `json:"activation_id,omitempty"`
+	Entitlement    string        `json:"entitlement,omitempty"`
+	LastServerTime time.Time     `json:"last_server_time,omitempty"`
+	LastObservedAt time.Time     `json:"last_observed_at,omitempty"`
+	LastRefresh    time.Time     `json:"last_refresh,omitempty"`
+	Upgrade        storedUpgrade `json:"upgrade,omitempty"`
+}
+
+// Persist only release metadata. Short-lived download credentials are refreshed
+// immediately before installation and never saved to disk.
+type storedUpgrade struct {
+	TargetTier    string `json:"target_tier,omitempty"`
+	TargetVersion string `json:"target_version,omitempty"`
+	Manifest      string `json:"manifest,omitempty"`
+}
+
+var identityMu sync.Mutex
+
+func stableRuntimeID(installationID string) string {
+	hostname, _ := os.Hostname()
+	machine, _ := os.ReadFile("/etc/machine-id")
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(installationID+"/"+hostname+"/"+strings.TrimSpace(string(machine)))).String()
 }
 
 func loadOrCreateIdentity(dir string) (installationIdentity, error) {
+	identityMu.Lock()
+	defer identityMu.Unlock()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return installationIdentity{}, err
 	}
 	if err := securePrivatePath(dir); err != nil {
 		return installationIdentity{}, fmt.Errorf("secure licensing state directory: %w", err)
+	}
+	// Serialize identity creation across processes as well as goroutines.
+	lockPath := filepath.Join(dir, "identity.lock")
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			lock.Close()
+			defer os.Remove(lockPath)
+			break
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return installationIdentity{}, err
+		}
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > time.Minute {
+			_ = os.Remove(lockPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return installationIdentity{}, errors.New("installation identity is locked by another process")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	path := filepath.Join(dir, "identity.json")
 	data, err := os.ReadFile(path)
@@ -77,7 +121,7 @@ func loadOrCreateIdentity(dir string) (installationIdentity, error) {
 		}
 		return installationIdentity{
 			InstallationID: stored.InstallationID,
-			RuntimeID:      uuid.NewString(),
+			RuntimeID:      stableRuntimeID(stored.InstallationID),
 			PublicKey:      ed25519.PublicKey(pub),
 			PrivateKey:     ed25519.PrivateKey(priv),
 		}, nil
@@ -104,7 +148,7 @@ func loadOrCreateIdentity(dir string) (installationIdentity, error) {
 	}
 	return installationIdentity{
 		InstallationID: stored.InstallationID,
-		RuntimeID:      uuid.NewString(),
+		RuntimeID:      stableRuntimeID(stored.InstallationID),
 		PublicKey:      pub,
 		PrivateKey:     priv,
 	}, nil

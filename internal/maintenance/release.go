@@ -67,7 +67,7 @@ func (v ManifestVerifier) Verify(raw string) (ArtifactManifest, error) {
 		return ArtifactManifest{}, errors.New("artifact manifest identity is invalid")
 	}
 	now := v.Clock().UTC()
-	if claims.ExpiresAt == nil || now.After(claims.ExpiresAt.Time) || claims.NotBefore != nil && now.Add(time.Minute).Before(claims.NotBefore.Time) {
+	if claims.ExpiresAt == nil || !now.Before(claims.ExpiresAt.Time) || claims.NotBefore != nil && now.Add(time.Minute).Before(claims.NotBefore.Time) {
 		return ArtifactManifest{}, errors.New("artifact manifest is outside its validity period")
 	}
 	if claims.Edition != edition.ProfessionalTier && claims.Edition != edition.EnterpriseTier {
@@ -80,7 +80,7 @@ func (v ManifestVerifier) Verify(raw string) (ArtifactManifest, error) {
 		return ArtifactManifest{}, errors.New("artifact digest is invalid")
 	}
 	switch claims.Format {
-	case "tar.gz":
+	case "tar.gz", "zip":
 		parsed, err := url.Parse(claims.URL)
 		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || claims.Image != "" {
 			return ArtifactManifest{}, errors.New("native artifact location is invalid")

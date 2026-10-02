@@ -209,6 +209,8 @@ type LicenseSnapshot = {
   features?: string[];
   upgrade?: {
     required?: boolean;
+    available?: boolean;
+    reason?: string;
     state?: string;
     target_tier?: string;
     target_version?: string;
@@ -1820,10 +1822,10 @@ function renderLicenseSettings(): string {
   const statusTone = ['active', 'grace'].includes(normalizedStatus) ? 'is-positive' : normalizedStatus === 'community' ? 'is-neutral' : 'is-warning';
   const upgradeNotice = upgrade.required
     ? `<div class="settings-section license-upgrade-notice">
-         <div class="settings-section-title">Upgrade ready</div>
-         <p>Install the matching Aegis release to enable <strong>${escapeSectionHtml(formatLicenseLabel(upgrade.target_tier || 'this upgrade'))}</strong>${upgrade.target_version ? ` ${escapeSectionHtml(upgrade.target_version)}` : ''}.</p>
+         <div class="settings-section-title">${upgrade.available ? 'Upgrade ready' : 'Release unavailable'}</div>
+         <p>${upgrade.available ? `Install the matching Aegis release to enable <strong>${escapeSectionHtml(formatLicenseLabel(upgrade.target_tier || 'this upgrade'))}</strong>${upgrade.target_version ? ` ${escapeSectionHtml(upgrade.target_version)}` : ''}.` : escapeSectionHtml(upgrade.reason || 'No compatible release is published for this installation yet.')}</p>
          <div class="settings-inline-actions" style="margin-top: 10px;">
-           <button class="btn btn-primary" type="button" data-settings-action="apply-upgrade" data-license-action>Apply upgrade now</button>
+           <button class="btn btn-primary" type="button" data-settings-action="apply-upgrade" data-license-action ${upgrade.available ? '' : 'disabled'}>Apply upgrade now</button>
          </div>
        </div>`
     : '';
@@ -1909,7 +1911,13 @@ function notifyLicenseChanged(): void {
 }
 
 async function applyUpgrade(): Promise<void> {
-  openSystemUpdateModal();
+  notify('Loading upgrade details...', 'info');
+  const status = await checkSystemUpdates(true);
+  if (status) {
+    openSystemUpdateModal(status);
+  } else {
+    openSystemUpdateModal();
+  }
 }
 
 async function handleCheckSystemUpdate(): Promise<void> {
@@ -1922,7 +1930,7 @@ async function handleCheckSystemUpdate(): Promise<void> {
   if (status.update_available) {
     openSystemUpdateModal(status);
   } else {
-    notify(`Aegis is up to date (${status.current_version}).`, 'success');
+    notify(status.error || `Aegis is up to date (${status.current_version}).`, status.error ? 'error' : 'success');
   }
 }
 
@@ -1948,12 +1956,15 @@ async function activateLicense(): Promise<void> {
     currentLicense = res.data.license;
     renderLicensePanel();
     notifyLicenseChanged();
+    void checkSystemUpdates(true);
     showLicenseCongratulationsModal(res.data.license.licensed_tier || res.data.license.effective_tier || 'professional', {
       expiresAt: res.data.license.expires_at,
       offlineUntil: res.data.license.offline_until,
       status: res.data.license.status
     });
-    settingsShowToast(res.data.license.status === 'upgrade_required' ? 'Licence accepted; upgrade is ready' : 'Licence activated successfully', 'success');
+    settingsShowToast(res.data.license.upgrade?.required
+      ? (res.data.license.upgrade.available ? 'Licence accepted; upgrade is ready' : 'Licence accepted; awaiting a compatible release')
+      : 'Licence activated successfully', 'success');
   } catch (err: any) {
     showLicenseErrorModal(err?.message || 'Licence activation failed.');
   } finally {
@@ -1969,6 +1980,7 @@ async function refreshLicense(): Promise<void> {
     currentLicense = snapshot;
     renderLicensePanel();
     notifyLicenseChanged();
+    void checkSystemUpdates(true);
     settingsShowToast('Licence refreshed', 'success');
   } finally {
     setLicenseActionsDisabled(false);
@@ -1993,6 +2005,7 @@ function deactivateLicense(): void {
         currentLicense = snapshot;
         renderLicensePanel();
         notifyLicenseChanged();
+        void checkSystemUpdates(true);
         settingsShowToast('Installation deactivated', 'success');
       } finally {
         setLicenseActionsDisabled(false);

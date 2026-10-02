@@ -38,6 +38,8 @@ func (s Status) validEntitlementStatus() bool {
 type UpgradeInfo struct {
 	Required      bool              `json:"required"`
 	State         string            `json:"state,omitempty"`
+	Reason        string            `json:"reason,omitempty"`
+	Available     bool              `json:"available"`
 	TargetTier    edition.BuildTier `json:"target_tier,omitempty"`
 	TargetVersion string            `json:"target_version,omitempty"`
 	Manifest      string            `json:"-"`
@@ -59,9 +61,19 @@ type Snapshot struct {
 	Upgrade         UpgradeInfo         `json:"upgrade"`
 
 	effective edition.FeatureSet
+	clock     func() time.Time
 }
 
-func (s Snapshot) Has(feature edition.FeatureID) bool { return s.effective.Has(feature) }
+func (s Snapshot) Has(feature edition.FeatureID) bool {
+	now := time.Now()
+	if s.clock != nil {
+		now = s.clock()
+	}
+	if !s.OfflineUntil.IsZero() && !now.Before(s.OfflineUntil) {
+		return edition.FeaturesForTier(edition.CommunityTier).Has(feature) && s.effective.Has(feature)
+	}
+	return s.effective.Has(feature)
+}
 
 type ActivationResult struct {
 	Snapshot Snapshot    `json:"license"`

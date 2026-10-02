@@ -76,7 +76,8 @@ export function renderUpdateBanner(status) {
         return;
     }
     const isCritical = status.severity === 'critical';
-    const severityLabel = isCritical ? 'Critical Security Update' : 'Update Available';
+    const isTierUpgrade = Boolean(status.is_tier_upgrade || (status.channel && status.current_channel && status.channel.toLowerCase() !== status.current_channel.toLowerCase()));
+    const severityLabel = isTierUpgrade ? 'Edition Upgrade Ready' : (isCritical ? 'Critical Security Update' : 'Update Available');
     const severityPillClass = isCritical ? 'update-pill-critical' : 'update-pill-recommended';
     container.className = `system-update-banner ${isCritical ? 'is-critical' : ''}`;
     container.innerHTML = `
@@ -119,25 +120,26 @@ export function openSystemUpdateModal(overrideStatus) {
     if (!status) {
         return;
     }
+    const isTierUpgrade = Boolean(status.is_tier_upgrade || (status.channel && status.current_channel && status.channel.toLowerCase() !== status.current_channel.toLowerCase()));
+    const isCommunity = !isTierUpgrade && (!status.channel || status.channel.toLowerCase() === 'community');
     const highlightsHtml = (status.highlights && status.highlights.length > 0)
         ? `<ul class="update-modal-highlights">
         ${status.highlights.map(h => `<li>${escapeHtml(h)}</li>`).join('')}
        </ul>`
-        : `<p class="update-modal-desc">This release includes stability, performance, and security enhancements.</p>`;
+        : `<p class="update-modal-desc">${isTierUpgrade ? 'Upgrade ready to activate commercial capabilities on this installation.' : 'This release includes stability, performance, and security enhancements.'}</p>`;
     const changelogLink = status.changelog_url
         ? `<a href="${escapeHtml(status.changelog_url)}" target="_blank" rel="noopener noreferrer" class="update-modal-link">
          View release details on GitHub <span class="link-icon">${updateIcons.externalLink}</span>
        </a>`
         : '';
-    const isCommunity = !status.channel || status.channel.toLowerCase() === 'community';
     const modalHtml = `
     <div class="section-confirm-head update-modal-head">
       <div class="section-confirm-icon update-modal-icon">
         ${updateIcons.arrowUpCircle}
       </div>
       <div class="section-confirm-title-block">
-        <h3 class="section-confirm-title">Software Update</h3>
-        <p class="section-confirm-sub">Review release highlights and apply the update to this installation.</p>
+        <h3 class="section-confirm-title">${isTierUpgrade ? 'Aegis Edition Upgrade' : 'Software Update'}</h3>
+        <p class="section-confirm-sub">${isTierUpgrade ? 'Review licensed capabilities and transition this node to the commercial edition.' : 'Review release highlights and apply the update to this installation.'}</p>
       </div>
       <button type="button" class="section-confirm-close" data-section-action="close-modal" aria-label="Close dialog">${updateIcons.x}</button>
     </div>
@@ -146,23 +148,24 @@ export function openSystemUpdateModal(overrideStatus) {
       <!-- Version Matrix -->
       <div class="update-version-grid">
         <div class="update-version-card">
-          <span class="update-version-label">Current version</span>
+          <span class="update-version-label">${isTierUpgrade ? 'Current edition' : 'Current version'}</span>
           <span class="update-version-val">${escapeHtml(status.current_version)}</span>
+          ${status.current_channel ? `<span class="update-version-tag">${escapeHtml(status.current_channel)}</span>` : ''}
         </div>
         <div class="update-version-arrow" aria-hidden="true">
           ${updateIcons.arrowRight}
         </div>
         <div class="update-version-card is-target">
-          <span class="update-version-label">Available version</span>
+          <span class="update-version-label">${isTierUpgrade ? 'Target edition' : 'Available version'}</span>
           <span class="update-version-val">${escapeHtml(status.latest_version)}</span>
-          <span class="update-version-tag">${escapeHtml(status.channel)}</span>
+          <span class="update-version-tag">${escapeHtml(status.channel || status.target_tier || 'commercial')}</span>
         </div>
       </div>
 
       <!-- Release Summary -->
       <div class="update-release-card">
         <div class="update-release-header">
-          <span class="update-release-title">${escapeHtml(status.title || `Aegis ${status.latest_version}`)}</span>
+          <span class="update-release-title">${escapeHtml(status.title || (isTierUpgrade ? `Aegis ${status.channel} Upgrade` : `Aegis ${status.latest_version}`))}</span>
           ${status.release_date ? `<span class="update-release-date">Released: ${escapeHtml(status.release_date)}</span>` : ''}
         </div>
         ${highlightsHtml}
@@ -171,20 +174,30 @@ export function openSystemUpdateModal(overrideStatus) {
 
       <!-- Safety Checklist & Instructions -->
       <div class="update-safety-box">
-        <div class="update-safety-title">${isCommunity ? 'Upgrade Instructions (Community Edition)' : 'Operational Guarantees'}</div>
+        <div class="update-safety-title">${isCommunity ? 'Upgrade Instructions (Community Edition)' : (isTierUpgrade ? 'Commercial Tier Upgrade Guarantees' : 'Operational Guarantees')}</div>
         <div class="update-safety-item">
           <span class="update-safety-check">${updateIcons.check}</span>
-          <span>${isCommunity ? 'Docker Deployments: Run <code>docker compose pull &amp;&amp; docker compose up -d</code>.' : 'Configuration (<code>/etc/aegis/config.yaml</code>) remains unchanged.'}</span>
+          <span>${isCommunity ? 'Docker Deployments: Run <code>docker compose pull &amp;&amp; docker compose up -d</code>.' : 'Configuration (<code>/etc/aegis/config.yaml</code>) remains preserved and valid.'}</span>
         </div>
         <div class="update-safety-item">
           <span class="update-safety-check">${updateIcons.check}</span>
-          <span>${isCommunity ? 'Linux Host Deployments: Download the release binary from GitHub and restart the <code>aegis</code> service.' : 'Custom WAF rules, SSL certificates, and threat data are preserved.'}</span>
+          <span>${isCommunity ? 'Linux Host Deployments: Download the release binary from GitHub and restart the <code>aegis</code> service.' : 'Custom WAF rules, SSL certificates, and threat data remain untouched.'}</span>
         </div>
         <div class="update-safety-item">
           <span class="update-safety-check">${updateIcons.check}</span>
           <span>${isCommunity ? 'Configurations (<code>/etc/aegis/config.yaml</code>), custom rules, and data remain preserved.' : 'Automatic rollback triggers if health validation fails on startup.'}</span>
         </div>
       </div>
+
+      ${(!isCommunity && !status.updater_configured) ? `
+        <div class="update-daemon-note" style="margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: rgba(249, 115, 22, 0.08); border: 1px solid rgba(249, 115, 22, 0.25); font-size: 0.8rem; line-height: 1.4; color: var(--text-main, #f3f4f6);">
+          <strong>Note:</strong> Automated updater daemon (<code>aegis-updater</code>) is not connected. To upgrade this installation:
+          <ul style="margin: 6px 0 0 16px; padding: 0;">
+            <li><strong>Docker:</strong> Update container image to the commercial release image (e.g. <code>aegis-${escapeHtml((status.channel || 'pro').toLowerCase())}:${escapeHtml(status.latest_version)}</code>) and run <code>docker compose up -d</code>.</li>
+            <li><strong>Linux host:</strong> Replace the binary with the ${escapeHtml(status.channel || 'commercial')} release and run <code>systemctl restart aegis</code>.</li>
+          </ul>
+        </div>
+      ` : ''}
 
       <!-- Progress area (hidden initially) -->
       <div id="update-progress-container" class="update-progress-container hidden">
@@ -194,14 +207,19 @@ export function openSystemUpdateModal(overrideStatus) {
     </div>
 
     <div class="section-confirm-footer update-modal-footer">
-      <button type="button" class="btn btn-outline section-confirm-cancel" data-section-action="close-modal" id="update-cancel-btn">${isCommunity ? 'Close' : 'Cancel'}</button>
+      <button type="button" class="btn btn-outline section-confirm-cancel" data-section-action="close-modal" id="update-cancel-btn">${isCommunity || !status.updater_configured ? 'Close' : 'Cancel'}</button>
       ${isCommunity
         ? `<a href="${escapeHtml(status.changelog_url || 'https://github.com/divinelabio/aegis/releases')}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" id="update-github-link">
              View Release on GitHub <span class="link-icon">${updateIcons.externalLink}</span>
            </a>`
-        : `<button type="button" class="btn btn-primary" id="update-apply-btn">
-             Install &amp; restart Aegis
-           </button>`}
+        : (status.updater_configured
+            ? `<button type="button" class="btn btn-primary" id="update-apply-btn">
+                 ${isTierUpgrade ? 'Upgrade &amp; restart Aegis' : 'Install &amp; restart Aegis'}
+               </button>`
+            : `<a href="${escapeHtml(status.changelog_url || 'https://github.com/divinelabio/aegis/releases')}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" id="update-github-link">
+                 View Release Artifacts <span class="link-icon">${updateIcons.externalLink}</span>
+               </a>`
+          )}
     </div>
   `;
     SectionUI.showModal(modalHtml, {

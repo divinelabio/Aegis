@@ -57,7 +57,17 @@ func (c *Config) GetLicenseConfig() (apiURL, stateDir string) {
 }
 
 type UpdaterConfig struct {
-	SocketPath string `mapstructure:"socket_path" json:"socket_path"`
+	SocketPath       string `mapstructure:"socket_path" json:"socket_path" yaml:"socket_path"`
+	StatePath        string `mapstructure:"state_path" json:"state_path" yaml:"state_path"`
+	ReleasesRoot     string `mapstructure:"releases_root" json:"releases_root" yaml:"releases_root"`
+	CurrentLink      string `mapstructure:"current_link" json:"current_link" yaml:"current_link"`
+	ServiceName      string `mapstructure:"service_name" json:"service_name" yaml:"service_name"`
+	HealthURL        string `mapstructure:"health_url" json:"health_url" yaml:"health_url"`
+	Mode             string `mapstructure:"mode" json:"mode" yaml:"mode"`
+	ComposePath      string `mapstructure:"compose_path" json:"compose_path" yaml:"compose_path"`
+	ComposeService   string `mapstructure:"compose_service" json:"compose_service" yaml:"compose_service"`
+	ReleaseEnvPath   string `mapstructure:"release_env_path" json:"release_env_path" yaml:"release_env_path"`
+	ContainerRuntime string `mapstructure:"container_runtime" json:"container_runtime" yaml:"container_runtime"`
 }
 
 type ServerConfig struct {
