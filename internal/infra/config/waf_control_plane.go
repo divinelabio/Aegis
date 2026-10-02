@@ -71,7 +71,7 @@ func CanonicalWAFSectionConfig(input sections.SectionConfig) (sections.SectionCo
 	}
 	protectionLevel := input.ProtectionLevel
 	if protectionLevel < 1 || protectionLevel > 5 {
-		protectionLevel = 1
+		protectionLevel = 3
 	}
 	if mode, _ := settings["mode"].(string); mode == "" {
 		if modeUpper, _ := settings["Mode"].(string); modeUpper != "" {
@@ -80,11 +80,37 @@ func CanonicalWAFSectionConfig(input sections.SectionConfig) (sections.SectionCo
 			settings["mode"] = "blocking"
 		}
 	}
-	settings["enabled"] = input.Enabled
+	enabled := input.Enabled
+	if e, ok := settings["enabled"].(bool); ok {
+		enabled = e
+	}
+	settings["enabled"] = enabled
 	settings["protection_level"] = protectionLevel
 
+	// Ensure engine configuration exists and is active
+	engineSettings, _ := settings["engine"].(map[string]interface{})
+	if engineSettings == nil {
+		engineSettings = make(map[string]interface{})
+	}
+	if _, ok := engineSettings["enable_crs"]; !ok {
+		engineSettings["enable_crs"] = true
+	}
+	if _, ok := engineSettings["anomaly_threshold"]; !ok {
+		engineSettings["anomaly_threshold"] = 5
+	}
+	if _, ok := engineSettings["paranoia_level"]; !ok {
+		engineSettings["paranoia_level"] = 1
+	}
+	if _, ok := engineSettings["crs_path"]; !ok || engineSettings["crs_path"] == "" {
+		engineSettings["crs_path"] = "data/rules/crs"
+	}
+	if _, ok := engineSettings["crs_setup_path"]; !ok || engineSettings["crs_setup_path"] == "" {
+		engineSettings["crs_setup_path"] = "data/rules/crs-setup.conf"
+	}
+	settings["engine"] = engineSettings
+
 	return sections.SectionConfig{
-		Enabled:         input.Enabled,
+		Enabled:         enabled,
 		ProtectionLevel: protectionLevel,
 		Settings:        settings,
 	}, nil
@@ -114,9 +140,20 @@ func InitializeWAFControlPlane(ctx context.Context, store WAFStore, cfg *Config)
 		wafSection, exists := bootstrapMap["waf_core"]
 		if !exists {
 			wafSection = sections.SectionConfig{
-				Enabled:         cfg.Sections.WAFCore.Enabled,
-				ProtectionLevel: cfg.Sections.WAFCore.ProtectionLevel,
-				Settings:        structToMap(cfg.Sections.WAFCore),
+				Enabled:         true,
+				ProtectionLevel: 3,
+				Settings: map[string]interface{}{
+					"enabled":          true,
+					"mode":             "blocking",
+					"protection_level": 3,
+					"engine": map[string]interface{}{
+						"enable_crs":        true,
+						"anomaly_threshold": 5,
+						"paranoia_level":    1,
+						"crs_path":          "data/rules/crs",
+						"crs_setup_path":    "data/rules/crs-setup.conf",
+					},
+				},
 			}
 		}
 		canonical, err := CanonicalWAFSectionConfig(wafSection)

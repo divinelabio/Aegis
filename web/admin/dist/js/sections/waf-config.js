@@ -471,7 +471,7 @@ const WAFConfig = {
     loadError: null,
     rulesView: 'main', // 'main' | 'managed' | 'editor'
     editingRule: null, // Rule being edited (null = creating new)
-    lastEnabledMode: 'detection',
+    lastEnabledMode: 'blocking',
     get tabs() {
         const hasDLP = api.hasFeature(FEATURES.WAF_LEAK_PROTECTION);
         const tabs = [

@@ -191,7 +191,17 @@ func (s *Section) Init(input sections.SectionConfig) error {
 		return err
 	}
 	s.mu.Lock()
-	s.enabled, s.protection, s.config, s.waf = input.Enabled, input.ProtectionLevel, config, engine
+	enabled := input.Enabled
+	if !input.Enabled && input.Settings != nil {
+		if e, ok := input.Settings["enabled"].(bool); ok {
+			enabled = e
+		}
+	}
+	protection := input.ProtectionLevel
+	if protection < 1 || protection > 5 {
+		protection = 3
+	}
+	s.enabled, s.protection, s.config, s.waf = enabled, protection, config, engine
 	s.settings = cloneMap(input.Settings)
 	s.lastError, s.lastReload = "", time.Now().UTC()
 

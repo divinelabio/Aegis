@@ -805,6 +805,18 @@ storage:
 
 upstream:
   target: ${UPSTREAM_URL}
+
+sections:
+  waf_core:
+    enabled: true
+    mode: blocking
+    protection_level: 3
+    engine:
+      enable_crs: true
+      anomaly_threshold: 5
+      paranoia_level: 1
+      crs_path: data/rules/crs
+      crs_setup_path: data/rules/crs-setup.conf
 CONFIG_EOF
 
     log_info "Pulling container images and launching services..."
@@ -1108,6 +1120,18 @@ storage:
 
 upstream:
   target: ${UPSTREAM_URL}
+
+sections:
+  waf_core:
+    enabled: true
+    mode: blocking
+    protection_level: 3
+    engine:
+      enable_crs: true
+      anomaly_threshold: 5
+      paranoia_level: 1
+      crs_path: data/rules/crs
+      crs_setup_path: data/rules/crs-setup.conf
 CONFIG_EOF
 
     # Setup Systemd Services (both aegis-server and aegis-updater)

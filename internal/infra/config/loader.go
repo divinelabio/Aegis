@@ -813,6 +813,15 @@ func configureConfigViper(settings *viper.Viper, path string) {
 	settings.SetDefault("infrastructure.trusted_proxies.source_files", []string{})
 	settings.SetDefault("infrastructure.trusted_proxies.source_root", "./data/trusted-proxies/sources")
 	settings.SetDefault("infrastructure.trusted_proxies.combined_list", "./data/trusted-proxies/combined.list")
+	settings.SetDefault("sections.waf_core.enabled", true)
+	settings.SetDefault("sections.waf_core.mode", "blocking")
+	settings.SetDefault("sections.waf_core.protection_level", 3)
+	settings.SetDefault("sections.waf_core.engine.enable_crs", true)
+	settings.SetDefault("sections.waf_core.engine.anomaly_threshold", 5)
+	settings.SetDefault("sections.waf_core.engine.paranoia_level", 1)
+	settings.SetDefault("sections.waf_core.engine.crs_path", "data/rules/crs")
+	settings.SetDefault("sections.waf_core.engine.crs_setup_path", "data/rules/crs-setup.conf")
+	settings.SetDefault("sections.waf_core.validation.max_body_size", int64(10<<20))
 	settings.AutomaticEnv()
 	settings.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 }
@@ -1792,6 +1801,9 @@ func (c *Config) GetSectionsConfigMap() map[string]sections.SectionConfig {
 
 	// WAF Core
 	wafSettings := structToMap(c.Sections.WAFCore)
+	if wafSettings == nil {
+		wafSettings = map[string]interface{}{}
+	}
 	httpSettings := c.Sections.HTTPSecurity
 	if httpSettings == nil {
 		httpSettings = map[string]interface{}{}
@@ -1805,9 +1817,60 @@ func (c *Config) GetSectionsConfigMap() map[string]sections.SectionConfig {
 		}
 	}
 
+	wafEnabled := true
+	if e, ok := wafSettings["enabled"].(bool); ok {
+		wafEnabled = e
+	} else if c.Sections.WAFCore.Enabled {
+		wafEnabled = true
+	} else if viper.IsSet("sections.waf_core.enabled") {
+		wafEnabled = c.Sections.WAFCore.Enabled
+	}
+
+	wafMode := c.Sections.WAFCore.Mode
+	if wafMode == "" {
+		if m, ok := wafSettings["mode"].(string); ok && m != "" {
+			wafMode = m
+		} else {
+			wafMode = "blocking"
+		}
+	}
+	wafSettings["enabled"] = wafEnabled
+	wafSettings["mode"] = wafMode
+
+	wafProtection := 3
+	if c.Sections.WAFCore.ProtectionLevel > 0 {
+		wafProtection = c.Sections.WAFCore.ProtectionLevel
+	} else if p, ok := wafSettings["protection_level"].(int); ok && p > 0 {
+		wafProtection = p
+	} else if p, ok := wafSettings["protection_level"].(float64); ok && p > 0 {
+		wafProtection = int(p)
+	}
+	wafSettings["protection_level"] = wafProtection
+
+	engineSettings, _ := wafSettings["engine"].(map[string]interface{})
+	if engineSettings == nil {
+		engineSettings = map[string]interface{}{}
+	}
+	if _, ok := engineSettings["enable_crs"]; !ok {
+		engineSettings["enable_crs"] = true
+	}
+	if _, ok := engineSettings["anomaly_threshold"]; !ok {
+		engineSettings["anomaly_threshold"] = 5
+	}
+	if _, ok := engineSettings["paranoia_level"]; !ok {
+		engineSettings["paranoia_level"] = 1
+	}
+	if _, ok := engineSettings["crs_path"]; !ok || engineSettings["crs_path"] == "" {
+		engineSettings["crs_path"] = "data/rules/crs"
+	}
+	if _, ok := engineSettings["crs_setup_path"]; !ok || engineSettings["crs_setup_path"] == "" {
+		engineSettings["crs_setup_path"] = "data/rules/crs-setup.conf"
+	}
+	wafSettings["engine"] = engineSettings
+
 	m["waf_core"] = sections.SectionConfig{
-		Enabled:         c.Sections.WAFCore.Enabled,
-		ProtectionLevel: c.Sections.WAFCore.ProtectionLevel,
+		Enabled:         wafEnabled,
+		ProtectionLevel: wafProtection,
 		Settings:        wafSettings,
 	}
 
