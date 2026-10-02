@@ -822,6 +822,10 @@ func configureConfigViper(settings *viper.Viper, path string) {
 	settings.SetDefault("sections.waf_core.engine.crs_path", "data/rules/crs")
 	settings.SetDefault("sections.waf_core.engine.crs_setup_path", "data/rules/crs-setup.conf")
 	settings.SetDefault("sections.waf_core.validation.max_body_size", int64(10<<20))
+	settings.SetDefault("sections.http_security.enabled", true)
+	settings.SetDefault("sections.http_security.protection_level", 3)
+	settings.SetDefault("sections.traffic_control.enabled", true)
+	settings.SetDefault("sections.traffic_control.protection_level", 3)
 	settings.AutomaticEnv()
 	settings.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 }

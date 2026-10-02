@@ -817,6 +817,38 @@ sections:
       paranoia_level: 1
       crs_path: data/rules/crs
       crs_setup_path: data/rules/crs-setup.conf
+
+  http_security:
+    enabled: true
+    protection_level: 3
+    security_headers:
+      enabled: true
+      hsts: "max-age=31536000; includeSubDomains"
+      x_frame_options: "DENY"
+      x_content_type_options: "nosniff"
+    upload_limit:
+      enabled: true
+      max_body_size: "10MB"
+    method_enforcer:
+      enabled: true
+      mode: "blocklist"
+      blocked_methods:
+        - TRACE
+        - TRACK
+        - CONNECT
+        - DEBUG
+
+  traffic_control:
+    enabled: true
+    protection_level: 3
+    rate_limit:
+      enabled: true
+      default_rate: 60
+      default_burst: 10
+      window: "1m"
+      key_by: "ip"
+    blacklist:
+      enabled: true
 CONFIG_EOF
 
     log_info "Pulling container images and launching services..."
@@ -1132,6 +1164,38 @@ sections:
       paranoia_level: 1
       crs_path: data/rules/crs
       crs_setup_path: data/rules/crs-setup.conf
+
+  http_security:
+    enabled: true
+    protection_level: 3
+    security_headers:
+      enabled: true
+      hsts: "max-age=31536000; includeSubDomains"
+      x_frame_options: "DENY"
+      x_content_type_options: "nosniff"
+    upload_limit:
+      enabled: true
+      max_body_size: "10MB"
+    method_enforcer:
+      enabled: true
+      mode: "blocklist"
+      blocked_methods:
+        - TRACE
+        - TRACK
+        - CONNECT
+        - DEBUG
+
+  traffic_control:
+    enabled: true
+    protection_level: 3
+    rate_limit:
+      enabled: true
+      default_rate: 60
+      default_burst: 10
+      window: "1m"
+      key_by: "ip"
+    blacklist:
+      enabled: true
 CONFIG_EOF
 
     # Setup Systemd Services (both aegis-server and aegis-updater)
