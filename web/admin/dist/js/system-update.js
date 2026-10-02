@@ -129,6 +129,7 @@ export function openSystemUpdateModal(overrideStatus) {
          View release details on GitHub <span class="link-icon">${updateIcons.externalLink}</span>
        </a>`
         : '';
+    const isCommunity = !status.channel || status.channel.toLowerCase() === 'community';
     const modalHtml = `
     <div class="section-confirm-head update-modal-head">
       <div class="section-confirm-icon update-modal-icon">
@@ -168,20 +169,20 @@ export function openSystemUpdateModal(overrideStatus) {
         ${changelogLink}
       </div>
 
-      <!-- Safety Checklist -->
+      <!-- Safety Checklist & Instructions -->
       <div class="update-safety-box">
-        <div class="update-safety-title">Operational Guarantees</div>
+        <div class="update-safety-title">${isCommunity ? 'Upgrade Instructions (Community Edition)' : 'Operational Guarantees'}</div>
         <div class="update-safety-item">
           <span class="update-safety-check">${updateIcons.check}</span>
-          <span>Configuration (<code>/etc/aegis/config.yaml</code>) remains unchanged.</span>
+          <span>${isCommunity ? 'Docker Deployments: Run <code>docker compose pull &amp;&amp; docker compose up -d</code>.' : 'Configuration (<code>/etc/aegis/config.yaml</code>) remains unchanged.'}</span>
         </div>
         <div class="update-safety-item">
           <span class="update-safety-check">${updateIcons.check}</span>
-          <span>Custom WAF rules, SSL certificates, and threat data are preserved.</span>
+          <span>${isCommunity ? 'Linux Host Deployments: Download the release binary from GitHub and restart the <code>aegis</code> service.' : 'Custom WAF rules, SSL certificates, and threat data are preserved.'}</span>
         </div>
         <div class="update-safety-item">
           <span class="update-safety-check">${updateIcons.check}</span>
-          <span>Automatic rollback triggers if health validation fails on startup.</span>
+          <span>${isCommunity ? 'Configurations (<code>/etc/aegis/config.yaml</code>), custom rules, and data remain preserved.' : 'Automatic rollback triggers if health validation fails on startup.'}</span>
         </div>
       </div>
 
@@ -193,10 +194,14 @@ export function openSystemUpdateModal(overrideStatus) {
     </div>
 
     <div class="section-confirm-footer update-modal-footer">
-      <button type="button" class="btn btn-outline section-confirm-cancel" data-section-action="close-modal" id="update-cancel-btn">Cancel</button>
-      <button type="button" class="btn btn-primary" id="update-apply-btn">
-        Install &amp; restart Aegis
-      </button>
+      <button type="button" class="btn btn-outline section-confirm-cancel" data-section-action="close-modal" id="update-cancel-btn">${isCommunity ? 'Close' : 'Cancel'}</button>
+      ${isCommunity
+        ? `<a href="${escapeHtml(status.changelog_url || 'https://github.com/divinelabio/aegis/releases')}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" id="update-github-link">
+             View Release on GitHub <span class="link-icon">${updateIcons.externalLink}</span>
+           </a>`
+        : `<button type="button" class="btn btn-primary" id="update-apply-btn">
+             Install &amp; restart Aegis
+           </button>`}
     </div>
   `;
     SectionUI.showModal(modalHtml, {
@@ -245,7 +250,7 @@ async function runSystemUpdateExecution(status, applyBtn, cancelBtn) {
     }
     catch (err) {
         if (progressStatus) {
-            progressStatus.textContent = `Error: ${err?.message || 'Upgrade failed'}`;
+            progressStatus.textContent = `${err?.message || 'Upgrade failed'}`;
             progressStatus.classList.add('text-danger');
         }
         applyBtn.disabled = false;

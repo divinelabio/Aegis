@@ -98,10 +98,18 @@ func (h *Handler) HandleSystemUpdateCheck(w http.ResponseWriter, r *http.Request
 			resp.UpdateAvailable = true
 			resp.Notify = true
 			resp.Severity = "recommended"
-			resp.Title = fmt.Sprintf("Aegis %s Upgrade", strings.Title(string(snapshot.Upgrade.TargetTier)))
-			resp.Highlights = []string{
-				fmt.Sprintf("Upgrade ready to unlock %s features and enhancements.", strings.Title(string(snapshot.Upgrade.TargetTier))),
-				"Hot-applied without service disruption; configurations remain preserved.",
+			if snapshot.Upgrade.TargetTier.Rank() > snapshot.EffectiveTier.Rank() {
+				resp.Title = fmt.Sprintf("Aegis %s Upgrade", strings.Title(string(snapshot.Upgrade.TargetTier)))
+				resp.Highlights = []string{
+					fmt.Sprintf("Upgrade ready to unlock %s features and enhancements.", strings.Title(string(snapshot.Upgrade.TargetTier))),
+					"Hot-applied without service disruption; configurations remain preserved.",
+				}
+			} else {
+				resp.Title = fmt.Sprintf("Aegis %s Update %s", strings.Title(string(snapshot.EffectiveTier)), snapshot.Upgrade.TargetVersion)
+				resp.Highlights = []string{
+					fmt.Sprintf("Hot-patch release %s ready for Aegis %s.", snapshot.Upgrade.TargetVersion, strings.Title(string(snapshot.EffectiveTier))),
+					"Hot-applied without service disruption; configurations remain preserved.",
+				}
 			}
 			resp.ChangelogURL = "https://github.com/divinelabio/aegis/releases"
 
@@ -214,10 +222,25 @@ func (h *Handler) HandleSystemUpdateApply(w http.ResponseWriter, r *http.Request
 	credential := ""
 	if h.License != nil {
 		snapshot := h.License.Snapshot()
-		if snapshot.Upgrade.Required {
+		if snapshot.Upgrade.Manifest != "" {
 			manifest = snapshot.Upgrade.Manifest
 			credential = snapshot.Upgrade.Credential
 		}
+	}
+
+	manifest = strings.TrimSpace(manifest)
+	if manifest == "" {
+		if h.License == nil {
+			h.JSONError(w, "In-place automated updater (aegis-updater) requires a signed commercial release manifest. For Aegis Community edition, please upgrade by pulling the updated container image (e.g. 'docker compose pull && docker compose up -d') or downloading the latest release binary from https://github.com/divinelabio/aegis/releases.", http.StatusBadRequest)
+		} else {
+			h.JSONError(w, "No signed artifact manifest is currently available for this update. Verify that the release artifact has been published in the licensing portal or contact support.", http.StatusBadRequest)
+		}
+		return
+	}
+
+	if parts := strings.Split(manifest, "."); len(parts) != 3 {
+		h.JSONError(w, "Artifact manifest is not a valid signed JWT (expected 3 dot-separated segments). Please verify the published artifact in the licensing repository.", http.StatusBadRequest)
+		return
 	}
 
 	resp, err := maintenance.CallUpdater(r.Context(), h.UpdaterSocket, maintenance.UpdaterRequest{

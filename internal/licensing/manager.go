@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/divinelabio/aegis/internal/edition"
+	"golang.org/x/mod/semver"
 )
 
 type Config struct {
@@ -493,9 +495,25 @@ func (m *RuntimeManager) upgradeFromResponse(response apiResponse) (UpgradeInfo,
 		return UpgradeInfo{}, err
 	}
 	upgrade.TargetTier = tier
-	upgrade.Required = tier.Rank() > m.config.CompiledTier.Rank()
+
+	isTierUpgrade := tier.Rank() > m.config.CompiledTier.Rank()
+	isVersionUpgrade := response.ArtifactManifest != "" && response.TargetVersion != "" && m.config.Version != "" &&
+		semver.Compare(normalizeVersion(response.TargetVersion), normalizeVersion(m.config.Version)) > 0
+
+	upgrade.Required = isTierUpgrade || (tier.Rank() == m.config.CompiledTier.Rank() && isVersionUpgrade)
 	if upgrade.Required {
 		upgrade.State = "ready"
 	}
 	return upgrade, nil
+}
+
+func normalizeVersion(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "v") {
+		return value
+	}
+	return "v" + value
 }
