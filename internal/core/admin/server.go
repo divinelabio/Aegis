@@ -34,10 +34,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// Version info (set via ldflags: -X 'github.com/.../admin.Version=1.0.0')
+// Version info (set via ldflags: -X 'github.com/.../admin.Version=1.0.1')
 var (
-	Version   string // Set via ldflags
-	BuildDate string // Set via ldflags
+	Version   = "1.0.1" // Set via ldflags
+	BuildDate = "unknown" // Set via ldflags
 )
 
 // AdminServer manages the administration interface.

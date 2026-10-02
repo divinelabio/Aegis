@@ -908,6 +908,8 @@ func main() {
 
 	// 8. Start Admin Panel
 	go func() {
+		admin.Version = Version
+		admin.BuildDate = BuildDate
 		adminServer := admin.NewAdminServer(
 			userRepo, cfg.Server, logger,
 			sectionMgr, healthHandler,

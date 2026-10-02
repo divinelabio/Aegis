@@ -39,9 +39,11 @@ jobs:
             fi
           }
 
+          LDFLAGS="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }} -X github.com/divinelabio/aegis/internal/core/admin.Version=${{ github.ref_name }} -X github.com/divinelabio/aegis/internal/core/admin/handlers.Version=${{ github.ref_name }}"
+
           # 1. Linux amd64
           echo "Building Linux amd64..."
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis ./cmd/aegis-server
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis-updater ./cmd/aegis-updater 2>/dev/null || true
           cp bin-dist/aegis aegis-linux-amd64
@@ -53,7 +55,7 @@ jobs:
 
           # 2. Linux arm64
           echo "Building Linux arm64..."
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis ./cmd/aegis-server
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis-updater ./cmd/aegis-updater 2>/dev/null || true
           cp bin-dist/aegis aegis-linux-arm64
@@ -65,7 +67,7 @@ jobs:
 
           # 3. Windows amd64
           echo "Building Windows amd64..."
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis.exe ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis.exe ./cmd/aegis-server
           cp bin-dist/aegis.exe aegis-windows-amd64.exe
           stage_assets
           (cd bin-dist && zip -r ../aegis-windows-amd64.zip .)

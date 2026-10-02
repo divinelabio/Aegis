@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,6 +56,44 @@ type apiResponse struct {
 	ArtifactCredential string    `json:"artifact_credential,omitempty"`
 }
 
+func createLicenseHTTPClient() *http.Client {
+	dialer := &net.Dialer{
+		Timeout:   15 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// First attempt: standard dial (dual-stack)
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err == nil {
+				return conn, nil
+			}
+
+			// If standard dial failed (e.g. DNS64/NAT64 synthesis, unreachable IPv6 route,
+			// or dual-stack EHOSTUNREACH / ENETUNREACH), immediately fallback to IPv4.
+			if network == "tcp" {
+				if conn4, err4 := dialer.DialContext(ctx, "tcp4", addr); err4 == nil {
+					return conn4, nil
+				}
+			}
+
+			return nil, err
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   25 * time.Second,
+	}
+}
+
 func newAPIClient(rawURL string) (*apiClient, error) {
 	if strings.TrimSpace(rawURL) == "" {
 		return nil, errors.New("licence API URL is not configured")
@@ -69,7 +108,7 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 	}
 	return &apiClient{
 		baseURL: strings.TrimRight(parsed.String(), "/"),
-		http:    &http.Client{Timeout: 10 * time.Second},
+		http:    createLicenseHTTPClient(),
 	}, nil
 }
 
@@ -107,17 +146,42 @@ func (c *apiClient) doJSON(ctx context.Context, method, path string, requestBody
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
-	if err != nil {
-		return err
+
+	var resp *http.Response
+	var reqErr error
+
+	// Retry once on transient network failures
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, reqErr = c.http.Do(req)
+		if reqErr == nil {
+			break
+		}
+
+		if ctx.Err() != nil {
+			return reqErr
+		}
+
+		if attempt == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
+
+	if reqErr != nil {
+		return reqErr
 	}
 	defer resp.Body.Close()
+
 	limited := io.LimitReader(resp.Body, 2<<20)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		message, _ := io.ReadAll(limited)

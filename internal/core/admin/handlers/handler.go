@@ -31,8 +31,8 @@ var ServerStartTime = time.Now()
 
 // Version info
 var (
-	Version   string
-	BuildDate string
+	Version   = "1.0.1"
+	BuildDate = "unknown"
 )
 
 // licenseTierStore holds the licence tier provider set by commercial overlays.

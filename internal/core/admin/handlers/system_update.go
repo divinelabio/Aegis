@@ -67,7 +67,7 @@ func (h *Handler) HandleSystemUpdateCheck(w http.ResponseWriter, r *http.Request
 
 	currentVer := strings.TrimSpace(Version)
 	if currentVer == "" {
-		currentVer = "1.0.0"
+		currentVer = "1.0.1"
 	}
 
 	channel := "community"
