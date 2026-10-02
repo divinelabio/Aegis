@@ -23,6 +23,8 @@ skills-lock.json
 /aegis-server
 /aegis-updater
 /aegisctl
+aegis-linux-*
+aegisctl-linux-*
 *.exe
 bin/
 .gocache/

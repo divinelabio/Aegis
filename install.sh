@@ -38,7 +38,7 @@ ADMIN_PASSWORD="${AEGIS_ADMIN_PASSWORD:-}"
 POSTGRES_HOST="${AEGIS_CONTROL_DB_HOST:-127.0.0.1}"
 POSTGRES_PORT="${AEGIS_CONTROL_DB_PORT:-5432}"
 POSTGRES_USER="${AEGIS_CONTROL_DB_USER:-aegis}"
-POSTGRES_DB="${AEGIS_CONTROL_DB_NAME:-aegis_control}"
+POSTGRES_DB="${AEGIS_CONTROL_DB_NAME:-aegis}"
 POSTGRES_PASSWORD="${AEGIS_CONTROL_DB_PASSWORD:-}"
 
 # ClickHouse real-time analytics database (enabled by default)
@@ -713,13 +713,13 @@ services:
     container_name: aegis_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: aegis_control
+      POSTGRES_DB: ${AEGIS_CONTROL_DB_NAME:-aegis}
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: ${AEGIS_CONTROL_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis_control"]
+      test: ["CMD-SHELL", "pg_isready -U aegis -d ${AEGIS_CONTROL_DB_NAME:-aegis}"]
       interval: 5s
       timeout: 3s
       retries: 10

@@ -745,7 +745,7 @@ func configureConfigViper(settings *viper.Viper, path string) {
 	settings.SetDefault("server.idle_timeout", "120s")
 	settings.SetDefault("server.max_header_bytes", 1048576)
 	settings.SetDefault("server.enable_http3", true)
-	settings.SetDefault("server.admin.host", "127.0.0.1")
+	settings.SetDefault("server.admin.host", "0.0.0.0")
 	settings.SetDefault("server.admin.port", 8081)
 	settings.SetDefault("server.admin.username", "admin")
 	settings.SetDefault("server.admin.secure_cookies", false)
