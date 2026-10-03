@@ -25,11 +25,14 @@ type apiClient struct {
 type activationRequest struct {
 	LicenseKey     string `json:"license_key"`
 	InstallationID string `json:"installation_id"`
+	RuntimeID      string `json:"runtime_id,omitempty"`
 	PublicKey      string `json:"public_key"`
 	Platform       string `json:"platform"`
 	Architecture   string `json:"architecture"`
 	Version        string `json:"version"`
 	Nonce          string `json:"nonce"`
+	ArtifactFormat string `json:"artifact_format,omitempty"`
+	UpdaterVersion string `json:"updater_version,omitempty"`
 }
 
 type signedPayload struct {
@@ -44,16 +47,31 @@ type leaseRequest struct {
 	Version        string `json:"version"`
 	Timestamp      int64  `json:"timestamp"`
 	Nonce          string `json:"nonce"`
+	ArtifactFormat string `json:"artifact_format,omitempty"`
+	UpdaterVersion string `json:"updater_version,omitempty"`
 }
 
 type apiResponse struct {
-	ActivationID       string    `json:"activation_id"`
-	Entitlement        string    `json:"entitlement"`
-	ServerTime         time.Time `json:"server_time"`
-	TargetTier         string    `json:"target_tier,omitempty"`
-	TargetVersion      string    `json:"target_version,omitempty"`
-	ArtifactManifest   string    `json:"artifact_manifest,omitempty"`
-	ArtifactCredential string    `json:"artifact_credential,omitempty"`
+	ActivationID                  string    `json:"activation_id"`
+	Entitlement                   string    `json:"entitlement"`
+	ServerTime                    time.Time `json:"server_time"`
+	TargetTier                    string    `json:"target_tier,omitempty"`
+	TargetVersion                 string    `json:"target_version,omitempty"`
+	ArtifactManifest              string    `json:"artifact_manifest,omitempty"`
+	ArtifactStatus                string    `json:"artifact_status,omitempty"`
+	ArtifactMinimumUpdaterVersion string    `json:"artifact_minimum_updater_version,omitempty"`
+	ArtifactCredential            string    `json:"artifact_credential,omitempty"`
+	SignedKeySet                  string    `json:"signed_key_set,omitempty"`
+}
+
+// APIError preserves the authority's error code and status for the admin API.
+type APIError struct {
+	Status int
+	Code   string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("licence API returned %d: %s", e.Status, e.Code)
 }
 
 func createLicenseHTTPClient() *http.Client {
@@ -184,8 +202,13 @@ func (c *apiClient) doJSON(ctx context.Context, method, path string, requestBody
 
 	limited := io.LimitReader(resp.Body, 2<<20)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message, _ := io.ReadAll(limited)
-		return fmt.Errorf("licence API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+		var failure struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(limited).Decode(&failure); err != nil || failure.Error == "" {
+			failure.Error = "authority_unavailable"
+		}
+		return &APIError{Status: resp.StatusCode, Code: failure.Error}
 	}
 	if responseBody == nil || resp.StatusCode == http.StatusNoContent {
 		return nil

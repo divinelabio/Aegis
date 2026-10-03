@@ -38,10 +38,12 @@ type ArtifactManifest struct {
 }
 
 type ManifestVerifier struct {
-	Issuer   string
-	Audience string
-	Keys     map[string]ed25519.PublicKey
-	Clock    func() time.Time
+	Issuer        string
+	Audience      string
+	Keys          map[string]ed25519.PublicKey
+	Clock         func() time.Time
+	RootPublicKey string
+	SignedKeySet  string
 }
 
 func (v ManifestVerifier) Verify(raw string) (ArtifactManifest, error) {
@@ -76,6 +78,9 @@ func (v ManifestVerifier) Verify(raw string) (ArtifactManifest, error) {
 	if !versionPattern.MatchString(claims.Version) || !semver.IsValid(normalizeVersion(claims.Version)) || claims.OperatingSystem != runtime.GOOS || claims.Architecture != runtime.GOARCH {
 		return ArtifactManifest{}, errors.New("artifact manifest does not match this host")
 	}
+	if claims.MinimumUpdaterVersion != "" && (!versionPattern.MatchString(claims.MinimumUpdaterVersion) || !semver.IsValid(normalizeVersion(claims.MinimumUpdaterVersion))) {
+		return ArtifactManifest{}, errors.New("artifact minimum updater version is invalid")
+	}
 	if !validSHA256(claims.Digest) {
 		return ArtifactManifest{}, errors.New("artifact digest is invalid")
 	}
@@ -85,8 +90,14 @@ func (v ManifestVerifier) Verify(raw string) (ArtifactManifest, error) {
 		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || claims.Image != "" {
 			return ArtifactManifest{}, errors.New("native artifact location is invalid")
 		}
+	case "docker.tar.gz":
+		location, err := url.Parse(claims.URL)
+		if err != nil || location.Scheme != "https" || location.Host == "" || location.User != nil || !validSHA256(claims.Image) || claims.OperatingSystem != "linux" {
+			return ArtifactManifest{}, errors.New("Docker archive identity or location is invalid")
+		}
 	case "oci":
-		if claims.URL != "" || !imagePattern.MatchString(claims.Image) || !strings.Contains(claims.Image, "@sha256:") || !strings.HasSuffix(claims.Image, claims.Digest) {
+		image, digest, pinned := strings.Cut(claims.Image, "@")
+		if claims.URL != "" || !imagePattern.MatchString(claims.Image) || image == "" || !pinned || digest != claims.Digest {
 			return ArtifactManifest{}, errors.New("OCI artifact reference is invalid")
 		}
 	default:

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/divinelabio/aegis/internal/licensing"
 	"github.com/google/uuid"
 	"golang.org/x/mod/semver"
 	"io"
@@ -31,39 +32,53 @@ import (
 const maxReleaseArchive = 1 << 30
 
 type UpdaterRequest struct {
-	Operation  string `json:"operation"`
-	Manifest   string `json:"manifest,omitempty"`
-	Credential string `json:"credential,omitempty"`
+	Operation    string `json:"operation"`
+	Manifest     string `json:"manifest,omitempty"`
+	Credential   string `json:"credential,omitempty"`
+	SignedKeySet string `json:"signed_key_set,omitempty"`
 }
 
 type UpdaterResponse struct {
-	OK      bool         `json:"ok"`
-	Error   string       `json:"error,omitempty"`
-	Status  UpdaterState `json:"status"`
-	Message string       `json:"message,omitempty"`
+	UpdaterVersion string       `json:"updater_version,omitempty"`
+	OK             bool         `json:"ok"`
+	Error          string       `json:"error,omitempty"`
+	Status         UpdaterState `json:"status"`
+	Message        string       `json:"message,omitempty"`
 }
 
 type UpdaterState struct {
-	JobID           string    `json:"job_id,omitempty"`
-	CandidateTarget string    `json:"candidate_target,omitempty"`
-	State           string    `json:"state"`
-	Edition         string    `json:"edition,omitempty"`
-	Version         string    `json:"version,omitempty"`
-	PreviousEdition string    `json:"previous_edition,omitempty"`
-	PreviousVersion string    `json:"previous_version,omitempty"`
-	LastError       string    `json:"last_error,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	CurrentTarget   string    `json:"current_target,omitempty"`
-	PreviousTarget  string    `json:"previous_target,omitempty"`
+	JobID            string    `json:"job_id,omitempty"`
+	CandidateTarget  string    `json:"candidate_target,omitempty"`
+	CandidateEdition string    `json:"candidate_edition,omitempty"`
+	CandidateVersion string    `json:"candidate_version,omitempty"`
+	State            string    `json:"state"`
+	Edition          string    `json:"edition,omitempty"`
+	Version          string    `json:"version,omitempty"`
+	PreviousEdition  string    `json:"previous_edition,omitempty"`
+	PreviousVersion  string    `json:"previous_version,omitempty"`
+	LastError        string    `json:"last_error,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	CurrentTarget    string    `json:"current_target,omitempty"`
+	PreviousTarget   string    `json:"previous_target,omitempty"`
+	KeySetVersion    int       `json:"key_set_version,omitempty"`
+	KeySetHash       string    `json:"key_set_hash,omitempty"`
+	SignedKeySet     string    `json:"signed_key_set,omitempty"`
 }
 
 type ReleaseDaemon struct {
-	Config   UpdaterConfig
-	Verifier ManifestVerifier
-	Version  string
-	mu       sync.Mutex
-	stateMu  sync.Mutex
-	running  bool
+	Config               UpdaterConfig
+	Verifier             ManifestVerifier
+	Version              string
+	mu                   sync.Mutex
+	stateMu              sync.Mutex
+	running              bool
+	stopping             bool
+	jobCancel            context.CancelFunc
+	jobs                 sync.WaitGroup
+	restartOverride      func(context.Context) error
+	nativeTargetOverride func() (string, error)
+	nativeSwitchOverride func(string) error
+	transport            http.RoundTripper
 }
 
 func (d *ReleaseDaemon) handleConnection(ctx context.Context, conn net.Conn) {
@@ -84,39 +99,94 @@ func (d *ReleaseDaemon) Execute(ctx context.Context, request UpdaterRequest) Upd
 		if err != nil {
 			return UpdaterResponse{Error: err.Error()}
 		}
-		return UpdaterResponse{OK: true, Status: state}
+		return UpdaterResponse{OK: true, Status: state, UpdaterVersion: d.Version}
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.stopping {
+		return UpdaterResponse{Error: "updater is stopping"}
+	}
 	if d.running {
 		state, _ := d.loadState()
 		return UpdaterResponse{Error: "an updater job is already running", Status: state}
 	}
 	var manifest ArtifactManifest
 	if request.Operation == "upgrade" {
-		var err error
-		manifest, err = d.Verifier.Verify(strings.TrimSpace(request.Manifest))
+		previous, err := d.loadState()
+		if err != nil {
+			return UpdaterResponse{Error: err.Error()}
+		}
+		verifier := d.Verifier
+		keySet := request.SignedKeySet
+		if keySet == "" {
+			keySet = previous.SignedKeySet
+		}
+		if keySet == "" {
+			keySet = verifier.SignedKeySet
+		}
+		if keySet != "" {
+			keys, err := licensing.CertifiedTrustedKeys(verifier.RootPublicKey, keySet, licensing.KeyPurposeArtifact, time.Now())
+			if err != nil {
+				return UpdaterResponse{Error: err.Error()}
+			}
+			version, err := licensing.CertifiedKeySetVersion(keySet)
+			if err != nil {
+				return UpdaterResponse{Error: err.Error()}
+			}
+			certificateHash := sha256.Sum256([]byte(keySet))
+			fingerprint := hex.EncodeToString(certificateHash[:])
+			if version < previous.KeySetVersion || (version == previous.KeySetVersion && previous.KeySetHash != "" && fingerprint != previous.KeySetHash) {
+				return UpdaterResponse{Error: "artifact key set downgrade rejected"}
+			}
+			previous.KeySetVersion = version
+			previous.KeySetHash = fingerprint
+			previous.SignedKeySet = keySet
+			verifier.Keys = keys
+		} else if previous.KeySetVersion > 0 {
+			return UpdaterResponse{Error: "certified artifact key set is required to preserve the persisted trust generation"}
+		}
+		manifest, err = verifier.Verify(strings.TrimSpace(request.Manifest))
 		if err != nil {
 			return UpdaterResponse{Error: err.Error()}
 		}
 		if manifest.MinimumUpdaterVersion != "" && compareVersions(d.Version, manifest.MinimumUpdaterVersion) < 0 {
 			return UpdaterResponse{Error: "updater version is below the manifest minimum"}
 		}
-		if (d.Config.Mode == "native" && manifest.Format != "tar.gz" && manifest.Format != "zip") || (d.Config.Mode == "docker" && manifest.Format != "oci") {
+		if (d.Config.Mode == "native" && manifest.Format != "tar.gz" && manifest.Format != "zip") || (d.Config.Mode == "docker" && manifest.Format != "oci" && manifest.Format != "docker.tar.gz") {
 			return UpdaterResponse{Error: "artifact format does not match configured updater mode"}
 		}
-	} else if request.Operation != "rollback" || request.Manifest != "" || request.Credential != "" {
+		if keySet != "" {
+			if err = d.saveState(previous); err != nil {
+				return UpdaterResponse{Error: err.Error()}
+			}
+		}
+	} else if request.Operation != "rollback" || request.Manifest != "" || request.Credential != "" || request.SignedKeySet != "" {
 		return UpdaterResponse{Error: "unsupported updater operation or caller data"}
 	}
 	state, err := d.loadState()
 	if err != nil {
 		return UpdaterResponse{Error: err.Error()}
 	}
+	if state.State == "switching" || state.State == "checking" || state.State == "rolling_back" {
+		return UpdaterResponse{Error: "interrupted release transition must be recovered before starting another job", Status: state}
+	}
+	if request.Operation == "upgrade" && d.Config.Mode == "native" {
+		// A journal can outlive an installer/manual recovery. Compare against
+		// the actual linked binary rather than rejecting based on stale state.
+		if err = d.initializeBaseline(ctx, &state); err != nil {
+			return UpdaterResponse{Error: err.Error(), Status: state}
+		}
+	}
 	if request.Operation == "upgrade" && state.Version != "" && compareVersions(manifest.Version, state.Version) < 0 {
 		return UpdaterResponse{Error: "artifact downgrade is not permitted"}
 	}
-	if request.Operation == "upgrade" && state.State == "active" && state.Version == manifest.Version && state.Edition == string(manifest.Edition) {
-		return UpdaterResponse{OK: true, Status: state, Message: "release already installed"}
+	if request.Operation == "upgrade" && state.State == "active" && sameReleaseVersion(state.Version, manifest.Version) && state.Edition == string(manifest.Edition) {
+		if d.waitHealthy(ctx, 2*time.Second, manifest.Version, string(manifest.Edition)) == nil {
+			if err = d.saveState(state); err != nil {
+				return UpdaterResponse{Error: err.Error()}
+			}
+			return UpdaterResponse{OK: true, Status: state, Message: "release already installed"}
+		}
 	}
 	if request.Operation == "rollback" && state.PreviousTarget == "" {
 		return UpdaterResponse{Error: "no previous release is available"}
@@ -129,10 +199,13 @@ func (d *ReleaseDaemon) Execute(ctx context.Context, request UpdaterRequest) Upd
 		return UpdaterResponse{Error: err.Error()}
 	}
 	d.running = true
+	jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	d.jobCancel = cancel
+	d.jobs.Add(1)
 	go func() {
-		defer func() { d.mu.Lock(); d.running = false; d.mu.Unlock() }()
+		defer d.jobs.Done()
+		defer func() { d.mu.Lock(); d.running = false; d.jobCancel = nil; d.mu.Unlock() }()
 		// The job survives the HTTP caller and the Aegis restart. The daemon owns it.
-		jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
 		time.Sleep(250 * time.Millisecond)
 		var jobErr error
@@ -146,6 +219,17 @@ func (d *ReleaseDaemon) Execute(ctx context.Context, request UpdaterRequest) Upd
 		}
 	}()
 	return UpdaterResponse{OK: true, Status: state, Message: "updater job queued"}
+}
+
+// Retain the process lock until cancellation and any necessary rollback finish.
+func (d *ReleaseDaemon) stopJobs() {
+	d.mu.Lock()
+	d.stopping = true
+	if d.jobCancel != nil {
+		d.jobCancel()
+	}
+	d.mu.Unlock()
+	d.jobs.Wait()
 }
 func (d *ReleaseDaemon) apply(ctx context.Context, manifest ArtifactManifest, credential string) (applyErr error) {
 	state, err := d.loadState()
@@ -174,6 +258,8 @@ func (d *ReleaseDaemon) apply(ctx context.Context, manifest ArtifactManifest, cr
 		return err
 	}
 	state.CandidateTarget = target
+	state.CandidateEdition = string(manifest.Edition)
+	state.CandidateVersion = manifest.Version
 	state.State = "switching"
 	state.UpdatedAt = time.Now().UTC()
 	if err = d.saveState(state); err != nil {
@@ -189,10 +275,12 @@ func (d *ReleaseDaemon) apply(ctx context.Context, manifest ArtifactManifest, cr
 			}
 		}
 	}()
+	// A platform switch can report an error after changing the link (for
+	// example, a directory sync failure). Conservatively restore the baseline.
+	switched = true
 	if err = d.switchTarget(ctx, target); err != nil {
 		return err
 	}
-	switched = true
 	state.CurrentTarget = target
 	state.State = "checking"
 	state.Edition = string(manifest.Edition)
@@ -209,12 +297,13 @@ func (d *ReleaseDaemon) apply(ctx context.Context, manifest ArtifactManifest, cr
 	state.State = "active"
 	state.LastError = ""
 	state.CandidateTarget = ""
+	state.CandidateEdition, state.CandidateVersion = "", ""
 	state.UpdatedAt = time.Now().UTC()
 	return d.saveState(state)
 }
 func (d *ReleaseDaemon) initializeBaseline(ctx context.Context, state *UpdaterState) error {
 	if d.Config.Mode == "native" {
-		actual, err := filepath.EvalSymlinks(d.Config.CurrentLink)
+		actual, err := d.resolveNativeTarget()
 		if err != nil {
 			return fmt.Errorf("resolve current release: %w", err)
 		}
@@ -222,10 +311,15 @@ func (d *ReleaseDaemon) initializeBaseline(ctx context.Context, state *UpdaterSt
 			return errors.New("current release is outside the configured release root")
 		}
 		state.CurrentTarget = actual
-		if info, err := readBuildInfo(ctx, actual); err == nil {
-			state.Version = info.Version
-			state.Edition = info.BuildTier
+		info, err := readBuildInfo(ctx, actual)
+		if err != nil {
+			return fmt.Errorf("inspect current release baseline: %w", err)
 		}
+		if !semver.IsValid(normalizeVersion(info.Version)) || (info.BuildTier != "community" && info.BuildTier != "professional" && info.BuildTier != "enterprise") {
+			return errors.New("current release baseline has invalid build identity")
+		}
+		state.Version = info.Version
+		state.Edition = info.BuildTier
 	} else {
 		if state.CurrentTarget == "" {
 			data, err := os.ReadFile(d.Config.ReleaseEnvPath)
@@ -241,6 +335,11 @@ func (d *ReleaseDaemon) initializeBaseline(ctx context.Context, state *UpdaterSt
 		if state.CurrentTarget == "" || !imagePattern.MatchString(state.CurrentTarget) {
 			return errors.New("initial image reference is missing or invalid")
 		}
+		info, err := d.dockerBuildInfo(ctx, state.CurrentTarget)
+		if err != nil || !semver.IsValid(normalizeVersion(info.Version)) || (info.BuildTier != "community" && info.BuildTier != "professional" && info.BuildTier != "enterprise") {
+			return errors.New("initial Docker image has invalid build identity")
+		}
+		state.Edition, state.Version = info.BuildTier, info.Version
 	}
 	return nil
 }
@@ -288,7 +387,7 @@ func (d *ReleaseDaemon) prepareNative(ctx context.Context, manifest ArtifactMani
 	if err != nil {
 		return "", fmt.Errorf("inspect release binary: %w", err)
 	}
-	if info.Version != manifest.Version || info.BuildTier != string(manifest.Edition) {
+	if !sameReleaseVersion(info.Version, manifest.Version) || info.BuildTier != string(manifest.Edition) {
 		return "", errors.New("release binary version or edition differs from its signed manifest")
 	}
 	// A unique target keeps an active release intact even when reinstalling the same version.
@@ -296,9 +395,31 @@ func (d *ReleaseDaemon) prepareNative(ctx context.Context, manifest ArtifactMani
 	if err = os.Rename(staging, target); err != nil {
 		return "", err
 	}
+	if err = syncReleaseDirectory(d.Config.ReleasesRoot); err != nil {
+		return "", err
+	}
 	return target, nil
 }
 func (d *ReleaseDaemon) prepareDocker(ctx context.Context, manifest ArtifactManifest, credential string) (string, error) {
+	if manifest.Format == "docker.tar.gz" {
+		archive, err := d.download(ctx, manifest, credential)
+		if err != nil {
+			return "", err
+		}
+		defer os.Remove(archive)
+		if err = fixedCommand(ctx, d.Config.ContainerRuntime, "load", "--input", archive); err != nil {
+			return "", errors.New("load signed Docker archive failed")
+		}
+		output, err := commandOutput(ctx, d.Config.ContainerRuntime, "image", "inspect", manifest.Image, "--format", "{{.Id}}")
+		if err != nil || strings.TrimSpace(output) != manifest.Image {
+			return "", errors.New("loaded Docker image differs from the signed image identity")
+		}
+		info, err := d.dockerBuildInfo(ctx, manifest.Image)
+		if err != nil || !sameReleaseVersion(info.Version, manifest.Version) || info.BuildTier != string(manifest.Edition) {
+			return "", errors.New("Docker binary version or edition differs from its signed manifest")
+		}
+		return manifest.Image, nil
+	}
 	if credential != "" {
 		registry := strings.SplitN(manifest.Image, "/", 2)[0]
 		login := exec.CommandContext(ctx, d.Config.ContainerRuntime, "login", registry, "--username", "aegis-token", "--password-stdin")
@@ -311,19 +432,77 @@ func (d *ReleaseDaemon) prepareDocker(ctx context.Context, manifest ArtifactMani
 	if err := fixedCommand(ctx, d.Config.ContainerRuntime, "pull", manifest.Image); err != nil {
 		return "", err
 	}
+	info, err := d.dockerBuildInfo(ctx, manifest.Image)
+	if err != nil || !sameReleaseVersion(info.Version, manifest.Version) || info.BuildTier != string(manifest.Edition) {
+		return "", errors.New("Docker binary version or edition differs from its signed manifest")
+	}
 	return manifest.Image, nil
+}
+func (d *ReleaseDaemon) dockerBuildInfo(ctx context.Context, image string) (releaseBuildInfo, error) {
+	var info releaseBuildInfo
+	output, err := commandOutput(ctx, d.Config.ContainerRuntime, "run", "--rm", "--network", "none", "--entrypoint", "/aegis", image, "--build-info")
+	if err == nil {
+		err = json.Unmarshal([]byte(output), &info)
+	}
+	return info, err
 }
 func (d *ReleaseDaemon) switchTarget(ctx context.Context, target string) error {
 	if d.Config.Mode == "native" {
+		if d.nativeSwitchOverride != nil {
+			return d.nativeSwitchOverride(target)
+		}
 		return atomicSymlink(target, d.Config.CurrentLink)
 	}
-	return writeAtomicFile(d.Config.ReleaseEnvPath, []byte("AEGIS_IMAGE="+target+"\n"), 0600)
+	return d.writeReleaseImage(target)
+}
+
+func (d *ReleaseDaemon) resolveNativeTarget() (string, error) {
+	if d.nativeTargetOverride != nil {
+		return d.nativeTargetOverride()
+	}
+	return filepath.EvalSymlinks(d.Config.CurrentLink)
+}
+
+func (d *ReleaseDaemon) writeReleaseImage(target string) error {
+	if !imagePattern.MatchString(target) {
+		return errors.New("invalid image reference")
+	}
+	data, err := os.ReadFile(d.Config.ReleaseEnvPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	updated := false
+	for index, line := range lines {
+		if strings.HasPrefix(line, "AEGIS_IMAGE=") {
+			lines[index] = "AEGIS_IMAGE=" + target
+			updated = true
+		}
+	}
+	if !updated {
+		lines = append(lines, "AEGIS_IMAGE="+target)
+	}
+	return writeAtomicFile(d.Config.ReleaseEnvPath, []byte(strings.Join(lines, "\n")+"\n"), 0600)
 }
 func (d *ReleaseDaemon) restart(ctx context.Context) error {
+	if d.restartOverride != nil {
+		return d.restartOverride(ctx)
+	}
 	if d.Config.Mode == "native" {
 		return restartService(ctx, d.Config.ServiceName)
 	}
-	return fixedCommand(ctx, d.Config.ContainerRuntime, "compose", "--env-file", d.Config.ReleaseEnvPath, "-f", d.Config.ComposePath, "up", "-d", "--no-deps", d.Config.ComposeService)
+	command := exec.CommandContext(ctx, d.Config.ContainerRuntime, "compose", "--env-file", d.Config.ReleaseEnvPath, "-f", d.Config.ComposePath, "up", "-d", "--no-deps", d.Config.ComposeService)
+	// A host shell variable must not override the manifest's pinned image.
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "AEGIS_IMAGE=") {
+			command.Env = append(command.Env, variable)
+		}
+	}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("compose restart failed: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 func (d *ReleaseDaemon) rollback(ctx context.Context) error {
 	state, err := d.loadState()
@@ -336,22 +515,29 @@ func (d *ReleaseDaemon) rollback(ctx context.Context) error {
 	if d.Config.Mode == "native" && !pathWithin(d.Config.ReleasesRoot, state.PreviousTarget) {
 		return errors.New("previous target is outside the release root")
 	}
-	if err = d.switchTarget(ctx, state.PreviousTarget); err != nil {
-		return err
+	// Record rollback intent before changing the link. Recovery can complete it
+	// whether the process stops immediately before or after the switch.
+	if state.CandidateTarget != "" && state.CurrentTarget == state.PreviousTarget {
+		state.CurrentTarget = state.CandidateTarget
+		state.Edition, state.Version = state.CandidateEdition, state.CandidateVersion
 	}
 	state.CurrentTarget, state.PreviousTarget = state.PreviousTarget, state.CurrentTarget
 	state.Edition, state.PreviousEdition = state.PreviousEdition, state.Edition
 	state.Version, state.PreviousVersion = state.PreviousVersion, state.Version
 	state.State = "rolling_back"
 	state.CandidateTarget = ""
+	state.CandidateEdition, state.CandidateVersion = "", ""
 	state.UpdatedAt = time.Now().UTC()
 	if err = d.saveState(state); err != nil {
+		return err
+	}
+	if err = d.switchTarget(ctx, state.CurrentTarget); err != nil {
 		return err
 	}
 	if err = d.restart(ctx); err != nil {
 		return err
 	}
-	if err = d.waitHealthy(ctx, 60*time.Second, state.Version, ""); err != nil {
+	if err = d.waitHealthyRelease(ctx, 60*time.Second, state.Version, state.Edition, false); err != nil {
 		return err
 	}
 	state.State = "rolled_back"
@@ -364,11 +550,28 @@ func (d *ReleaseDaemon) recoverInterrupted(ctx context.Context) error {
 		return err
 	}
 	switch state.State {
-	case "switching", "checking", "rolling_back":
+	case "switching", "checking":
 		if state.PreviousTarget == "" {
 			return errors.New("interrupted upgrade has no recorded rollback target")
 		}
 		if err = d.rollback(ctx); err != nil {
+			return err
+		}
+	case "rolling_back":
+		// The rollback journal already names the restored release as current.
+		// Complete that switch rather than swapping back to the failed release.
+		if err = d.switchTarget(ctx, state.CurrentTarget); err != nil {
+			return err
+		}
+		if err = d.restart(ctx); err != nil {
+			return err
+		}
+		if err = d.waitHealthyRelease(ctx, 60*time.Second, state.Version, state.Edition, false); err != nil {
+			return err
+		}
+		state.State = "rolled_back"
+		state.UpdatedAt = time.Now().UTC()
+		if err = d.saveState(state); err != nil {
 			return err
 		}
 	case "queued", "installing":
@@ -379,6 +582,9 @@ func (d *ReleaseDaemon) recoverInterrupted(ctx context.Context) error {
 	return nil
 }
 func (d *ReleaseDaemon) waitHealthy(ctx context.Context, limit time.Duration, version, tier string) error {
+	return d.waitHealthyRelease(ctx, limit, version, tier, true)
+}
+func (d *ReleaseDaemon) waitHealthyRelease(ctx context.Context, limit time.Duration, version, tier string, requireLicensed bool) error {
 	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
@@ -396,7 +602,7 @@ func (d *ReleaseDaemon) waitHealthy(ctx context.Context, limit time.Duration, ve
 			}
 			decodeErr := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&health)
 			response.Body.Close()
-			if response.StatusCode == 200 && decodeErr == nil && (health.Status == "healthy" || health.Status == "degraded") && (version == "" || health.Version == version) && (tier == "" || (health.BuildTier == tier && health.EffectiveTier == tier)) {
+			if response.StatusCode == 200 && decodeErr == nil && (health.Status == "healthy" || health.Status == "degraded") && (version == "" || sameReleaseVersion(health.Version, version)) && (tier == "" || (health.BuildTier == tier && (!requireLicensed || health.EffectiveTier == tier))) {
 				return nil
 			}
 		}
@@ -458,7 +664,13 @@ func extractZipRelease(archive, destination string) error {
 			input.Close()
 			return err
 		}
-		_, copyErr := io.Copy(output, io.LimitReader(input, maxReleaseArchive+1))
+		written, copyErr := io.Copy(output, io.LimitReader(input, maxReleaseArchive+1))
+		if copyErr == nil && uint64(written) != file.UncompressedSize64 {
+			copyErr = errors.New("release file size differs from archive header")
+		}
+		if copyErr == nil {
+			copyErr = output.Sync()
+		}
 		input.Close()
 		closeErr := output.Close()
 		if copyErr != nil || closeErr != nil {
@@ -507,6 +719,9 @@ func (d *ReleaseDaemon) download(ctx context.Context, manifest ArtifactManifest,
 		}
 		return nil
 	}}
+	if d.transport != nil {
+		client.Transport = d.transport
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, manifest.URL, nil)
 	if err != nil {
 		return "", err
@@ -603,7 +818,13 @@ func extractRelease(archive, destination string) error {
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(out, io.LimitReader(reader, header.Size))
+			written, copyErr := io.Copy(out, io.LimitReader(reader, header.Size))
+			if copyErr == nil && written != header.Size {
+				copyErr = errors.New("release file size differs from archive header")
+			}
+			if copyErr == nil {
+				copyErr = out.Sync()
+			}
 			closeErr := out.Close()
 			if copyErr != nil || closeErr != nil {
 				return errors.New("could not extract release file")
@@ -642,8 +863,17 @@ func (d *ReleaseDaemon) saveState(state UpdaterState) error {
 }
 
 func (d *ReleaseDaemon) failure(err error) UpdaterResponse {
-	state, _ := d.loadState()
-	state.State, state.LastError, state.UpdatedAt = "failed", err.Error(), time.Now().UTC()
+	state, loadErr := d.loadState()
+	if loadErr != nil {
+		err = errors.Join(err, fmt.Errorf("read updater failure journal: %w", loadErr))
+		log.Printf("updater failure could not be journaled: %v", err)
+		return UpdaterResponse{Error: err.Error()}
+	}
+	// Preserve outstanding side-effect intent so restart can recover it.
+	if state.State != "switching" && state.State != "checking" && state.State != "rolling_back" {
+		state.State = "failed"
+	}
+	state.LastError, state.UpdatedAt = err.Error(), time.Now().UTC()
 	if saveErr := d.saveState(state); saveErr != nil {
 		err = errors.Join(err, fmt.Errorf("persist updater failure: %w", saveErr))
 	}
@@ -658,7 +888,7 @@ func validateUpdaterConfig(config UpdaterConfig) error {
 	if config.SocketPath == "" || config.StatePath == "" || config.Mode != "native" && config.Mode != "docker" {
 		return errors.New("updater paths and mode are invalid")
 	}
-	if config.Mode == "docker" && (config.ComposePath == "" || !filepath.IsAbs(config.ComposePath) || config.ComposeService == "") {
+	if config.Mode == "docker" && (config.ComposePath == "" || !filepath.IsAbs(config.ComposePath) || config.ComposeService == "" || !filepath.IsAbs(config.ReleaseEnvPath)) {
 		return errors.New("Docker updater requires a fixed absolute Compose path and service")
 	}
 	return nil
@@ -686,7 +916,10 @@ func writeAtomicFile(path string, data []byte, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return replaceFile(name, path)
+	if err = replaceFile(name, path); err != nil {
+		return err
+	}
+	return syncReleaseDirectory(filepath.Dir(path))
 }
 
 func fixedCommand(ctx context.Context, name string, args ...string) error {
@@ -705,4 +938,8 @@ func pathWithin(root, target string) bool {
 
 func compareVersions(left, right string) int {
 	return semver.Compare(normalizeVersion(left), normalizeVersion(right))
+}
+
+func sameReleaseVersion(left, right string) bool {
+	return semver.IsValid(normalizeVersion(left)) && semver.IsValid(normalizeVersion(right)) && normalizeVersion(left) == normalizeVersion(right)
 }

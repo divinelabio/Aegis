@@ -36,14 +36,17 @@ func (s Status) validEntitlementStatus() bool {
 }
 
 type UpgradeInfo struct {
-	Required      bool              `json:"required"`
-	State         string            `json:"state,omitempty"`
-	Reason        string            `json:"reason,omitempty"`
-	Available     bool              `json:"available"`
-	TargetTier    edition.BuildTier `json:"target_tier,omitempty"`
-	TargetVersion string            `json:"target_version,omitempty"`
-	Manifest      string            `json:"-"`
-	Credential    string            `json:"-"`
+	Required              bool              `json:"required"`
+	State                 string            `json:"state,omitempty"`
+	Reason                string            `json:"reason,omitempty"`
+	Available             bool              `json:"available"`
+	TargetTier            edition.BuildTier `json:"target_tier,omitempty"`
+	TargetVersion         string            `json:"target_version,omitempty"`
+	MinimumUpdaterVersion string            `json:"minimum_updater_version,omitempty"`
+	Manifest              string            `json:"-"`
+	Credential            string            `json:"-"`
+	SignedKeySet          string            `json:"-"`
+	ValidUntil            time.Time         `json:"-"`
 }
 
 type Snapshot struct {

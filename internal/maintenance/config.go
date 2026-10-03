@@ -67,7 +67,7 @@ func LoadConfig(path string) (Config, error) {
 		cfg.Updater.ReleaseEnvPath = resolvePath(programData, cfg.Updater.ReleaseEnvPath, "Aegis/release.env")
 	} else {
 		cfg.Updater.SocketPath = resolvePath(base, cfg.Updater.SocketPath, "/run/aegis/updater.sock")
-		cfg.Updater.StatePath = resolvePath(base, cfg.Updater.StatePath, "/var/lib/aegis/updater-state.json")
+		cfg.Updater.StatePath = resolvePath(base, cfg.Updater.StatePath, "/var/lib/aegis-updater/updater-state.json")
 		cfg.Updater.ReleasesRoot = resolvePath(base, cfg.Updater.ReleasesRoot, "/opt/aegis/releases")
 		cfg.Updater.CurrentLink = resolvePath(base, cfg.Updater.CurrentLink, "/opt/aegis/current")
 		cfg.Updater.ReleaseEnvPath = resolvePath(base, cfg.Updater.ReleaseEnvPath, "/etc/aegis/release.env")

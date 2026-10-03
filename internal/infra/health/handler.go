@@ -82,6 +82,14 @@ func (h *Handler) ReadinessHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	for _, check := range h.checks {
+		result := check()
+		if result.Status == StatusUnhealthy {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "not_ready", "dependency": result.Name})
+			return
+		}
+	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{

@@ -33,7 +33,7 @@ type SignedKeySet struct {
 }
 
 // CertifiedTrustedKeys verifies an exact key-set payload with Aegis' offline
-// root key. API responses are never allowed to introduce signing keys.
+// root key. API responses can introduce keys only through a root certification.
 func CertifiedTrustedKeys(rootPublicKey, encodedEnvelope, purpose string, now time.Time) (map[string]ed25519.PublicKey, error) {
 	root, err := base64.RawStdEncoding.DecodeString(rootPublicKey)
 	if err != nil || len(root) != ed25519.PublicKeySize {
@@ -88,4 +88,25 @@ func CertifiedTrustedKeys(rootPublicKey, encodedEnvelope, purpose string, now ti
 		return nil, fmt.Errorf("no currently valid %s signing keys", purpose)
 	}
 	return trusted, nil
+}
+
+// CertifiedKeySetVersion is called only after certificate verification.
+func CertifiedKeySetVersion(encodedEnvelope string) (int, error) {
+	data, err := base64.RawStdEncoding.DecodeString(encodedEnvelope)
+	if err != nil {
+		return 0, err
+	}
+	var envelope SignedKeySet
+	if err = json.Unmarshal(data, &envelope); err != nil {
+		return 0, err
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(envelope.Payload)
+	if err != nil {
+		return 0, err
+	}
+	var keys KeySetPayload
+	if err = json.Unmarshal(payload, &keys); err != nil {
+		return 0, err
+	}
+	return keys.Version, nil
 }

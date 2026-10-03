@@ -2,6 +2,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { checkGeneratedAdminRuntime } from './admin-generated-runtime-check.mjs';
 
 const root = process.cwd();
 const adminRoot = path.join(root, 'web', 'admin');
@@ -840,20 +841,14 @@ if (editionTypes.includes('FeatureEdgeAccess') || (enterpriseBundle && enterpris
   fail('Phase 13 must not introduce a new Edge Access entitlement');
 }
 
-const inGitRepo = (() => {
-  try {
-    execSync('git rev-parse --is-inside-work-tree', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-if (inGitRepo) {
-  const changed = execSync('git diff --name-only -- web/admin/dist/js', { encoding: 'utf8' }).trim();
-  if (changed) {
-    fail(`Generated runtime JS is out-of-sync with TS source:\n${changed}`);
-  }
+let changedRuntimeFiles;
+try {
+  changedRuntimeFiles = checkGeneratedAdminRuntime(root);
+} catch (error) {
+  fail(`Could not verify generated runtime JS: ${error instanceof Error ? error.message : String(error)}`);
+}
+if (changedRuntimeFiles.length > 0) {
+  fail(`Generated runtime JS is out-of-sync with TS source. Run npm run admin:build:\n${changedRuntimeFiles.map(file => `web/admin/dist/js/${file}`).join('\n')}`);
 }
 
 const inlineHandlerTotal = inlineHandlerCounts.reduce((sum, [, count]) => sum + count, 0);

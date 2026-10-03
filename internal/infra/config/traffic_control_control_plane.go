@@ -2,8 +2,12 @@ package config
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/divinelabio/aegis/internal/sections"
@@ -182,7 +186,7 @@ func applyTrafficControlPlaneDocument(document TrafficControlDocument, bootstrap
 	if document.Revision < 1 {
 		return errors.New("traffic control configuration revision is invalid")
 	}
-	canonical, err := CanonicalTrafficControlSectionConfig(document.Config)
+	canonical, err := trafficControlRuntimeSectionConfig(document)
 	if err != nil {
 		return err
 	}
@@ -197,9 +201,53 @@ func applyTrafficControlPlaneDocument(document TrafficControlDocument, bootstrap
 	}
 
 	trafficControlPlaneManaged = true
+	document.Config = canonical
 	trafficControlLatestDoc = cloneTrafficControlDocument(document)
 	activateTrafficControlConfig(bootstrap, canonical)
 	return nil
+}
+
+// Community documents already have a durable PostgreSQL revision, but older
+// payloads do not carry the commercial runtime's control metadata. Project
+// that existing provenance into the runtime document without changing policy.
+func trafficControlRuntimeSectionConfig(document TrafficControlDocument) (sections.SectionConfig, error) {
+	canonical, err := CanonicalTrafficControlSectionConfig(document.Config)
+	if err != nil {
+		return sections.SectionConfig{}, err
+	}
+	control := make(map[string]interface{})
+	if raw := canonical.Settings["control"]; raw != nil {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return sections.SectionConfig{}, fmt.Errorf("encode traffic control metadata: %w", err)
+		}
+		if err := json.Unmarshal(data, &control); err != nil {
+			return sections.SectionConfig{}, fmt.Errorf("decode traffic control metadata: %w", err)
+		}
+	}
+	if revision, _ := control["revision"].(string); strings.TrimSpace(revision) == "" {
+		if document.Revision < 1 {
+			return sections.SectionConfig{}, errors.New("traffic control configuration revision is invalid")
+		}
+		policy := canonical
+		policy.Settings = make(map[string]interface{}, len(canonical.Settings))
+		for key, value := range canonical.Settings {
+			if key != "control" {
+				policy.Settings[key] = value
+			}
+		}
+		data, err := json.Marshal(policy)
+		if err != nil {
+			return sections.SectionConfig{}, fmt.Errorf("checksum traffic control document: %w", err)
+		}
+		checksum := sha256.Sum256(data)
+		control["schema_version"] = TrafficControlConfigurationSchemaVersion
+		control["revision"] = fmt.Sprintf("pg-%d", document.Revision)
+		control["checksum"] = hex.EncodeToString(checksum[:])
+		control["updated_by"] = "system:postgresql-projection"
+	}
+	canonical.Settings["control"] = control
+	return canonical, nil
 }
 
 func activateTrafficControlConfig(bootstrap *Config, canonical sections.SectionConfig) {

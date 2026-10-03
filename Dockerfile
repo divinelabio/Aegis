@@ -15,7 +15,7 @@ COPY . .
 # GOOS=linux ensures we build for Linux regardless of the host OS
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X github.com/divinelabio/aegis/internal/core/admin.Version=${VERSION} -X github.com/divinelabio/aegis/internal/core/admin.BuildDate=${BUILD_DATE}" -o /aegis ./cmd/aegis-server && \
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildDate=${BUILD_DATE}" -o /aegis ./cmd/aegis-server && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildDate=${BUILD_DATE}" -o /aegis-updater ./cmd/aegis-updater && \
     mkdir -p /runtime/data/tls/certs /runtime/data/tls/acme
 

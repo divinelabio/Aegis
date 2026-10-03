@@ -17,16 +17,21 @@ import (
 )
 
 type Config struct {
-	StateDir         string
-	APIURL           string
-	Issuer           string
-	Audience         string
-	Version          string
-	CompiledTier     edition.BuildTier
-	CompiledFeatures edition.FeatureSet
-	TrustedKeys      map[string]ed25519.PublicKey
-	RefreshInterval  time.Duration
-	Clock            func() time.Time
+	StateDir           string
+	APIURL             string
+	Issuer             string
+	Audience           string
+	Version            string
+	ArtifactFormat     string
+	UpdaterVersion     string
+	UpdaterVersionFunc func(context.Context) string
+	CompiledTier       edition.BuildTier
+	CompiledFeatures   edition.FeatureSet
+	TrustedKeys        map[string]ed25519.PublicKey
+	RootPublicKey      string
+	SignedKeySet       string
+	RefreshInterval    time.Duration
+	Clock              func() time.Time
 }
 
 // StaticTrustedKeys parses kid=base64-public-key entries supplied by an
@@ -61,6 +66,12 @@ type RuntimeManager struct {
 const maxLocalClockRollback = 2 * time.Minute
 
 func NewManager(config Config) (*RuntimeManager, error) {
+	if config.ArtifactFormat == "" {
+		config.ArtifactFormat = "tar.gz"
+		if platformName() == "windows" {
+			config.ArtifactFormat = "zip"
+		}
+	}
 	if config.StateDir == "" {
 		config.StateDir = "./data/license"
 	}
@@ -93,6 +104,24 @@ func NewManager(config Config) (*RuntimeManager, error) {
 		state:    state,
 		verifier: verifier{issuer: config.Issuer, audience: config.Audience, keys: config.TrustedKeys, clock: config.Clock},
 	}
+	if state.SignedKeySet != "" {
+		// A newer official binary may carry a newer certified bundle than the
+		// installation last persisted. Keep the compiled bundle in that case;
+		// restoring the old one would both roll trust back and block startup.
+		useStored := true
+		if config.SignedKeySet != "" {
+			storedVersion, storedErr := CertifiedKeySetVersion(state.SignedKeySet)
+			compiledVersion, compiledErr := CertifiedKeySetVersion(config.SignedKeySet)
+			if storedErr == nil && compiledErr == nil && storedVersion < compiledVersion {
+				useStored = false
+			}
+		}
+		if useStored {
+			if err := manager.acceptKeySet(state.SignedKeySet); err != nil {
+				return nil, fmt.Errorf("restore certified trust: %w", err)
+			}
+		}
+	}
 	if config.APIURL != "" {
 		manager.client, err = newAPIClient(config.APIURL)
 		if err != nil {
@@ -108,14 +137,16 @@ func NewManager(config Config) (*RuntimeManager, error) {
 		return manager, nil
 	}
 	if state.Entitlement != "" {
-		upgrade, _ := manager.upgradeFromResponse(apiResponse{TargetTier: state.Upgrade.TargetTier, TargetVersion: state.Upgrade.TargetVersion, ArtifactManifest: state.Upgrade.Manifest})
+		upgrade, _ := manager.upgradeFromResponse(apiResponse{TargetTier: state.Upgrade.TargetTier, TargetVersion: state.Upgrade.TargetVersion, ArtifactManifest: state.Upgrade.Manifest, ArtifactStatus: state.Upgrade.ArtifactStatus, ArtifactMinimumUpdaterVersion: state.Upgrade.MinimumUpdaterVersion})
 		if err := manager.applyEntitlement(state.Entitlement, state.LastServerTime, upgrade); err != nil {
 			snapshot := manager.communitySnapshot()
+			snapshot.ActivationID = state.ActivationID
 			snapshot.Status = StatusInvalid
 			snapshot.LastError = err.Error()
 			manager.current.Store(snapshot)
 		} else if err := manager.recordObservedTime(config.Clock().UTC()); err != nil {
 			snapshot := manager.communitySnapshot()
+			snapshot.ActivationID = state.ActivationID
 			snapshot.Status = StatusInvalid
 			snapshot.LastError = fmt.Sprintf("persist licence trusted time: %v", err)
 			manager.current.Store(snapshot)
@@ -126,7 +157,8 @@ func NewManager(config Config) (*RuntimeManager, error) {
 
 func (m *RuntimeManager) Snapshot() Snapshot {
 	snapshot := m.current.Load().(Snapshot)
-	if !snapshot.OfflineUntil.IsZero() && !m.config.Clock().Before(snapshot.OfflineUntil) {
+	paidStatus := snapshot.Status == StatusActive || snapshot.Status == StatusGrace || snapshot.Status == StatusPastDue || snapshot.Status == StatusUpgradeRequired
+	if paidStatus && !snapshot.OfflineUntil.IsZero() && !m.config.Clock().Before(snapshot.OfflineUntil) {
 		snapshot.Status = StatusExpired
 		snapshot.EffectiveTier = edition.CommunityTier
 		snapshot.effective = edition.Intersect(m.config.CompiledFeatures, edition.FeaturesForTier(edition.CommunityTier))
@@ -136,6 +168,11 @@ func (m *RuntimeManager) Snapshot() Snapshot {
 		snapshot.Status = StatusGrace
 	}
 	snapshot.Features = append([]edition.FeatureID(nil), snapshot.Features...)
+	if snapshot.Upgrade.Available && !snapshot.Upgrade.ValidUntil.IsZero() && !m.config.Clock().Before(snapshot.Upgrade.ValidUntil) {
+		snapshot.Upgrade.Available = false
+		snapshot.Upgrade.State = "unavailable"
+		snapshot.Upgrade.Reason = "The release manifest expired. Refresh to obtain a current release manifest."
+	}
 	snapshot.effective = snapshot.effective.Clone()
 	return snapshot
 }
@@ -153,7 +190,7 @@ func (m *RuntimeManager) Subscribe() <-chan Snapshot {
 	return channel
 }
 
-func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationResult, error) {
+func (m *RuntimeManager) Activate(ctx context.Context, key string) (result ActivationResult, activationErr error) {
 	m.operationMu.Lock()
 	defer m.operationMu.Unlock()
 	previous := m.Snapshot()
@@ -166,9 +203,6 @@ func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationRe
 	m.stateMu.Lock()
 	oldActivation := m.state.ActivationID
 	m.stateMu.Unlock()
-	if oldActivation != "" {
-		return ActivationResult{}, errors.New("this installation is already activated; refresh it or deactivate it before changing the licence key")
-	}
 	if m.client == nil {
 		return ActivationResult{}, errors.New("licence activation service is not configured")
 	}
@@ -184,10 +218,13 @@ func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationRe
 		LicenseKey:     key,
 		InstallationID: m.identity.InstallationID,
 		PublicKey:      base64.RawStdEncoding.EncodeToString(m.identity.PublicKey),
+		RuntimeID:      m.identity.RuntimeID,
 		Platform:       platformName(),
 		Architecture:   architectureName(),
 		Version:        m.config.Version,
 		Nonce:          nonce,
+		ArtifactFormat: m.config.ArtifactFormat,
+		UpdaterVersion: m.updaterVersion(ctx),
 	})
 	if err != nil {
 		m.publish(m.withStatus(StatusCommunity, err.Error()))
@@ -195,6 +232,29 @@ func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationRe
 	}
 	if response.ActivationID == "" {
 		return ActivationResult{}, errors.New("licence activation response is missing an activation ID")
+	}
+	// Release the reserved seat if validation or local persistence fails.
+	defer func() {
+		if committed || response.ActivationID == oldActivation {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// Journal before DELETE so a failed or ambiguous response can be retried
+		// after restart without overwriting the previously valid entitlement.
+		if err := m.queueActivationRelease(response.ActivationID); err != nil {
+			activationErr = errors.Join(activationErr, fmt.Errorf("persist rejected activation cleanup: %w", err), m.releaseActivation(cleanupCtx, response.ActivationID))
+			return
+		}
+		activationErr = errors.Join(activationErr, m.releasePendingActivations(cleanupCtx))
+	}()
+	if response.ActivationID != oldActivation {
+		if err := m.queueActivationRelease(response.ActivationID); err != nil {
+			return ActivationResult{}, fmt.Errorf("persist activation reservation: %w", err)
+		}
+	}
+	if err := m.acceptKeySet(response.SignedKeySet); err != nil {
+		return ActivationResult{}, err
 	}
 	upgrade, err := m.upgradeFromResponse(response)
 	if err != nil {
@@ -209,23 +269,44 @@ func (m *RuntimeManager) Activate(ctx context.Context, key string) (ActivationRe
 		m.publish(m.withStatus(StatusInvalid, err.Error()))
 		return ActivationResult{}, err
 	}
-	candidate := persistedState{
-		ActivationID:   response.ActivationID,
-		Entitlement:    response.Entitlement,
-		LastServerTime: response.ServerTime.UTC(),
-		LastObservedAt: now,
-		LastRefresh:    now,
-		Upgrade:        storedUpgrade{TargetTier: string(upgrade.TargetTier), TargetVersion: upgrade.TargetVersion, Manifest: upgrade.Manifest},
+	if oldActivation != "" && snapshot.Status != StatusActive && snapshot.Status != StatusGrace && snapshot.Status != StatusPastDue && snapshot.Status != StatusUpgradeRequired {
+		return ActivationResult{}, errors.New("replacement licence does not grant a usable entitlement")
 	}
+	m.stateMu.Lock()
+	pending := append([]string(nil), m.state.PendingDeactivations...)
+	m.stateMu.Unlock()
+	candidate := persistedState{
+		ActivationID:         response.ActivationID,
+		Entitlement:          response.Entitlement,
+		LastServerTime:       response.ServerTime.UTC(),
+		LastObservedAt:       now,
+		LastRefresh:          now,
+		Upgrade:              storedUpgrade{TargetTier: string(upgrade.TargetTier), TargetVersion: upgrade.TargetVersion, Manifest: upgrade.Manifest, ArtifactStatus: response.ArtifactStatus, MinimumUpdaterVersion: upgrade.MinimumUpdaterVersion},
+		SignedKeySet:         m.config.SignedKeySet,
+		PendingDeactivations: pending,
+	}
+	candidate.PendingDeactivations = pendingActivationReleases(candidate, oldActivation)
+	var persistenceErr error
 	if err := savePersistedState(m.config.StateDir, candidate); err != nil {
-		return ActivationResult{}, err
+		// writeJSONAtomic can report a permission-hardening error after rename.
+		// Never release a new seat if its entitlement is already on disk.
+		stored, readErr := loadPersistedState(m.config.StateDir)
+		if readErr != nil || stored.ActivationID != candidate.ActivationID || stored.Entitlement != candidate.Entitlement {
+			return ActivationResult{}, err
+		}
+		persistenceErr = fmt.Errorf("secure committed licence state: %w", err)
 	}
 	m.stateMu.Lock()
 	m.state = candidate
 	m.stateMu.Unlock()
 	m.publish(snapshot)
 	committed = true
-	return ActivationResult{Snapshot: m.Snapshot(), Upgrade: upgrade}, nil
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.releasePendingActivations(cleanupCtx); err != nil {
+		m.publish(m.withStatus(snapshot.Status, "Previous licence seat release is pending: "+err.Error()))
+	}
+	return ActivationResult{Snapshot: m.Snapshot(), Upgrade: snapshot.Upgrade}, persistenceErr
 }
 
 func (m *RuntimeManager) Refresh(ctx context.Context) error {
@@ -235,9 +316,12 @@ func (m *RuntimeManager) Refresh(ctx context.Context) error {
 }
 
 func (m *RuntimeManager) refresh(ctx context.Context) (operationErr error) {
+	cleanupErr := m.releasePendingActivations(ctx)
 	defer func() {
 		if operationErr != nil {
 			m.recalculateCached(operationErr.Error())
+		} else if cleanupErr != nil {
+			m.publish(m.withStatus(m.Snapshot().Status, "Previous licence seat release is pending: "+cleanupErr.Error()))
 		}
 	}()
 	if m.client == nil {
@@ -247,6 +331,9 @@ func (m *RuntimeManager) refresh(ctx context.Context) (operationErr error) {
 	activationID := m.state.ActivationID
 	m.stateMu.Unlock()
 	if activationID == "" {
+		if cleanupErr != nil {
+			return cleanupErr
+		}
 		return errors.New("installation is not activated")
 	}
 	nonce, err := randomNonce()
@@ -260,12 +347,17 @@ func (m *RuntimeManager) refresh(ctx context.Context) (operationErr error) {
 		Version:        m.config.Version,
 		Timestamp:      m.config.Clock().UTC().Unix(),
 		Nonce:          nonce,
+		ArtifactFormat: m.config.ArtifactFormat,
+		UpdaterVersion: m.updaterVersion(ctx),
 	}, m.identity.PrivateKey)
 	if err != nil {
 		return err
 	}
 	if response.ActivationID != "" && response.ActivationID != activationID {
 		return errors.New("licence refresh response activation ID does not match the active installation")
+	}
+	if err := m.acceptKeySet(response.SignedKeySet); err != nil {
+		return err
 	}
 	upgrade, err := m.upgradeFromResponse(response)
 	if err != nil {
@@ -284,7 +376,8 @@ func (m *RuntimeManager) refresh(ctx context.Context) (operationErr error) {
 	candidate.LastServerTime = response.ServerTime.UTC()
 	candidate.LastObservedAt = now
 	candidate.LastRefresh = now
-	candidate.Upgrade = storedUpgrade{TargetTier: string(upgrade.TargetTier), TargetVersion: upgrade.TargetVersion, Manifest: upgrade.Manifest}
+	candidate.Upgrade = storedUpgrade{TargetTier: string(upgrade.TargetTier), TargetVersion: upgrade.TargetVersion, Manifest: upgrade.Manifest, ArtifactStatus: response.ArtifactStatus, MinimumUpdaterVersion: upgrade.MinimumUpdaterVersion}
+	candidate.SignedKeySet = m.config.SignedKeySet
 	if err := savePersistedState(m.config.StateDir, candidate); err != nil {
 		return err
 	}
@@ -292,6 +385,42 @@ func (m *RuntimeManager) refresh(ctx context.Context) (operationErr error) {
 	m.state = candidate
 	m.stateMu.Unlock()
 	m.publish(snapshot)
+	return nil
+}
+
+func (m *RuntimeManager) updaterVersion(ctx context.Context) string {
+	if m.config.UpdaterVersionFunc != nil {
+		return m.config.UpdaterVersionFunc(ctx)
+	}
+	return m.config.UpdaterVersion
+}
+
+func (m *RuntimeManager) acceptKeySet(encoded string) error {
+	if encoded == "" || encoded == m.config.SignedKeySet {
+		return nil
+	}
+	if m.config.RootPublicKey == "" {
+		return errors.New("a root-certified key set cannot be accepted without the pinned root key")
+	}
+	keys, err := CertifiedTrustedKeys(m.config.RootPublicKey, encoded, KeyPurposeLease, m.config.Clock())
+	if err != nil {
+		return err
+	}
+	version, err := CertifiedKeySetVersion(encoded)
+	if err != nil {
+		return err
+	}
+	if m.config.SignedKeySet != "" {
+		previous, err := CertifiedKeySetVersion(m.config.SignedKeySet)
+		if err != nil {
+			return err
+		}
+		if version <= previous {
+			return errors.New("certified key set downgrade rejected")
+		}
+	}
+	m.verifier.keys = keys
+	m.config.SignedKeySet = encoded
 	return nil
 }
 
@@ -305,7 +434,7 @@ func (m *RuntimeManager) Deactivate(ctx context.Context) error {
 	activationID := m.state.ActivationID
 	m.stateMu.Unlock()
 	if activationID == "" {
-		return nil
+		return m.releasePendingActivations(ctx)
 	}
 	nonce, err := randomNonce()
 	if err != nil {
@@ -323,14 +452,92 @@ func (m *RuntimeManager) Deactivate(ctx context.Context) error {
 		m.publish(m.withStatus(StatusDeactivationPending, err.Error()))
 		return err
 	}
-	if err := clearPersistedState(m.config.StateDir); err != nil {
+	m.stateMu.Lock()
+	pending := append([]string(nil), m.state.PendingDeactivations...)
+	m.stateMu.Unlock()
+	candidate := persistedState{PendingDeactivations: pending}
+	if err := savePersistedState(m.config.StateDir, candidate); err != nil {
 		return err
 	}
 	m.stateMu.Lock()
-	m.state = persistedState{}
+	m.state = candidate
 	m.stateMu.Unlock()
 	m.publish(m.communitySnapshot())
+	return m.releasePendingActivations(ctx)
+}
+
+// pendingActivationReleases owns its slice and never schedules the active seat.
+func pendingActivationReleases(state persistedState, activationIDs ...string) []string {
+	var pending []string
+	seen := make(map[string]bool)
+	for _, id := range append(append([]string(nil), state.PendingDeactivations...), activationIDs...) {
+		if id != "" && id != state.ActivationID && !seen[id] {
+			pending = append(pending, id)
+			seen[id] = true
+		}
+	}
+	return pending
+}
+
+// All callers hold operationMu. Persist changes before publishing them in memory.
+func (m *RuntimeManager) queueActivationRelease(activationID string) error {
+	m.stateMu.Lock()
+	candidate := m.state
+	m.stateMu.Unlock()
+	candidate.PendingDeactivations = pendingActivationReleases(candidate, activationID)
+	if err := savePersistedState(m.config.StateDir, candidate); err != nil {
+		return err
+	}
+	m.stateMu.Lock()
+	m.state = candidate
+	m.stateMu.Unlock()
 	return nil
+}
+
+func (m *RuntimeManager) releaseActivation(ctx context.Context, activationID string) error {
+	nonce, err := randomNonce()
+	if err != nil {
+		return err
+	}
+	return m.client.deactivate(ctx, activationID, leaseRequest{
+		ActivationID: activationID, InstallationID: m.identity.InstallationID,
+		RuntimeID: m.identity.RuntimeID, Version: m.config.Version,
+		Timestamp: m.config.Clock().UTC().Unix(), Nonce: nonce,
+	}, m.identity.PrivateKey)
+}
+
+func (m *RuntimeManager) releasePendingActivations(ctx context.Context) error {
+	if m.client == nil {
+		return nil
+	}
+	m.stateMu.Lock()
+	pending := pendingActivationReleases(m.state)
+	m.stateMu.Unlock()
+	var failures []error
+	for _, id := range pending {
+		if err := m.releaseActivation(ctx, id); err != nil {
+			failures = append(failures, fmt.Errorf("release activation %s: %w", id, err))
+			continue
+		}
+		m.stateMu.Lock()
+		candidate := m.state
+		remainingIDs := pendingActivationReleases(candidate)
+		m.stateMu.Unlock()
+		candidate.PendingDeactivations = nil
+		for _, remaining := range remainingIDs {
+			if remaining != id {
+				candidate.PendingDeactivations = append(candidate.PendingDeactivations, remaining)
+			}
+		}
+		if err := savePersistedState(m.config.StateDir, candidate); err != nil {
+			// Keep the ID on disk on failure; DELETE is idempotent on retry.
+			return errors.Join(append(failures, fmt.Errorf("persist activation release: %w", err))...)
+		}
+		m.stateMu.Lock()
+		m.state = candidate
+		m.stateMu.Unlock()
+	}
+	return errors.Join(failures...)
 }
 
 func (m *RuntimeManager) Start(ctx context.Context) {
@@ -423,6 +630,9 @@ func (m *RuntimeManager) entitlementSnapshot(raw string, serverTime, previousSer
 	}
 	if !paidAllowed {
 		upgrade = UpgradeInfo{}
+	} else if upgrade.TargetTier != "" && upgrade.TargetTier != claims.Tier {
+		// A response's unsigned release metadata cannot override the paid plan.
+		upgrade = UpgradeInfo{TargetTier: claims.Tier, State: "unavailable", Reason: "The release edition does not match this licence. Refresh after a matching release is published."}
 	}
 
 	entitled := edition.FeaturesForTier(edition.CommunityTier)
@@ -440,6 +650,10 @@ func (m *RuntimeManager) entitlementSnapshot(raw string, serverTime, previousSer
 			status = StatusUpgradeRequired
 			upgrade.Required = true
 			upgrade.TargetTier = claims.Tier
+			if !upgrade.Available && upgrade.Reason == "" {
+				upgrade.State = "unavailable"
+				upgrade.Reason = "No compatible release is available for this installation. Refresh after the release is published."
+			}
 		}
 	}
 	snapshot := Snapshot{
@@ -473,6 +687,9 @@ func (m *RuntimeManager) recalculateCached(message string) {
 	}
 	if err := m.applyEntitlement(raw, serverTime, m.Snapshot().Upgrade); err != nil {
 		snapshot := m.communitySnapshot()
+		m.stateMu.Lock()
+		snapshot.ActivationID = m.state.ActivationID
+		m.stateMu.Unlock()
 		snapshot.Status = StatusInvalid
 		snapshot.LastError = err.Error()
 		m.publish(snapshot)
@@ -480,6 +697,9 @@ func (m *RuntimeManager) recalculateCached(message string) {
 	}
 	if err := m.recordObservedTime(m.config.Clock().UTC()); err != nil {
 		snapshot := m.communitySnapshot()
+		m.stateMu.Lock()
+		snapshot.ActivationID = m.state.ActivationID
+		m.stateMu.Unlock()
 		snapshot.Status = StatusInvalid
 		snapshot.LastError = fmt.Sprintf("persist licence trusted time: %v", err)
 		m.publish(snapshot)
@@ -555,27 +775,71 @@ func (m *RuntimeManager) upgradeFromResponse(response apiResponse) (UpgradeInfo,
 		TargetVersion: response.TargetVersion,
 		Manifest:      response.ArtifactManifest,
 		Credential:    response.ArtifactCredential,
+		SignedKeySet:  m.config.SignedKeySet,
+	}
+	// Catalog availability is independent of whether a newer version is known.
+	// An outage or compatibility failure must not be presented as up to date.
+	switch response.ArtifactStatus {
+	case "updater_upgrade_required":
+		upgrade.State = "unavailable"
+		minimum := strings.TrimSpace(response.ArtifactMinimumUpdaterVersion)
+		if semver.IsValid(normalizeVersion(minimum)) {
+			upgrade.MinimumUpdaterVersion = minimum
+			upgrade.Reason = fmt.Sprintf("The local aegis-updater needs version %s or later before this release can be installed. Follow the standalone updater installation or native migration instructions, then refresh the licence.", minimum)
+		} else {
+			upgrade.Reason = "The local aegis-updater must be updated before this release can be installed. Follow the standalone updater installation or native migration instructions, then refresh the licence."
+		}
+	case "resolver_unavailable":
+		upgrade.State, upgrade.Reason = "unavailable", "The commercial release catalog is unavailable. Retry the licence refresh after the licensing service recovers."
+	case "unavailable":
+		upgrade.State, upgrade.Reason = "unavailable", "No compatible commercial release is available for this installation. A release may be unpublished or require a newer aegis-updater. Check the updater version, then refresh after a compatible release is published."
+	case "not_entitled":
+		upgrade.State, upgrade.Reason = "unavailable", "This licence is not entitled to a commercial release. Refresh its status and verify the subscription."
+	case "", "available":
+		if response.ArtifactManifest == "" && (response.ArtifactStatus != "" || response.TargetTier != "") {
+			upgrade.State, upgrade.Reason = "unavailable", "No signed commercial release manifest was returned. Check that a compatible release is published and the updater version is supported, then refresh the licence."
+		} else if response.ArtifactStatus == "available" && (response.TargetTier == "" || !semver.IsValid(normalizeVersion(response.TargetVersion))) {
+			upgrade.State, upgrade.Reason = "unavailable", "The commercial release catalog returned incomplete release metadata. Refresh after the licensing service recovers."
+		}
+	default:
+		upgrade.State, upgrade.Reason = "unavailable", "The commercial release catalog returned an unsupported availability status. Refresh after the licensing service recovers."
 	}
 	if response.TargetTier == "" {
 		return upgrade, nil
 	}
 	tier, err := edition.ParseBuildTier(response.TargetTier)
 	if err != nil {
-		return UpgradeInfo{}, err
+		// A bad release response must not reject an otherwise valid entitlement.
+		return UpgradeInfo{State: "unavailable", Reason: "The release metadata has an invalid edition. Refresh after a matching release is published."}, nil
 	}
 	upgrade.TargetTier = tier
 
-	isTierUpgrade := tier.Rank() > m.config.CompiledTier.Rank()
-	isVersionUpgrade := response.ArtifactManifest != "" && response.TargetVersion != "" && m.config.Version != "" &&
+	// A paid plan change can also select a lower edition at the same release
+	// version. This replaces the binary to match the signed entitlement while
+	// the artifact checks below still reject a numeric version downgrade.
+	isEditionChange := tier != m.config.CompiledTier && tier != edition.CommunityTier
+	isVersionUpgrade := semver.IsValid(normalizeVersion(response.TargetVersion)) && semver.IsValid(normalizeVersion(m.config.Version)) &&
 		semver.Compare(normalizeVersion(response.TargetVersion), normalizeVersion(m.config.Version)) > 0
 
-	upgrade.Required = isTierUpgrade || (tier.Rank() == m.config.CompiledTier.Rank() && isVersionUpgrade)
+	upgrade.Required = isEditionChange || (tier == m.config.CompiledTier && isVersionUpgrade)
+	if upgrade.State == "unavailable" {
+		upgrade.Manifest, upgrade.Credential = "", ""
+		return upgrade, nil
+	}
 	if upgrade.Required {
 		upgrade.State = "unavailable"
 		upgrade.Reason = "No compatible release is available for this installation. Refresh after the release is published."
-		if upgrade.Manifest != "" && semver.IsValid(normalizeVersion(upgrade.TargetVersion)) &&
-			(!semver.IsValid(normalizeVersion(m.config.Version)) || semver.Compare(normalizeVersion(upgrade.TargetVersion), normalizeVersion(m.config.Version)) >= 0) {
-			upgrade.State, upgrade.Available, upgrade.Reason = "ready", true, ""
+		if !semver.IsValid(normalizeVersion(m.config.Version)) {
+			upgrade.Reason = "The running binary has no valid release version. Install an official versioned build before upgrading."
+		} else if upgrade.Manifest != "" && semver.IsValid(normalizeVersion(upgrade.TargetVersion)) &&
+			semver.Compare(normalizeVersion(upgrade.TargetVersion), normalizeVersion(m.config.Version)) >= 0 {
+			validUntil, err := m.verifyUpgradeArtifact(upgrade)
+			if err != nil {
+				upgrade.Reason = "The release manifest could not be verified: " + err.Error()
+			} else {
+				upgrade.ValidUntil = validUntil
+				upgrade.State, upgrade.Available, upgrade.Reason = "ready", true, ""
+			}
 		}
 	}
 	return upgrade, nil

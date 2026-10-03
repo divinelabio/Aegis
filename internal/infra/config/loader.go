@@ -70,6 +70,9 @@ type UpdaterConfig struct {
 	ContainerRuntime string `mapstructure:"container_runtime" json:"container_runtime" yaml:"container_runtime"`
 }
 
+func (c *Config) GetUpdaterMode() string   { return c.Updater.Mode }
+func (c *Config) GetUpdaterSocket() string { return c.Updater.SocketPath }
+
 type ServerConfig struct {
 	Port              int         `mapstructure:"port"`
 	ReadTimeout       string      `mapstructure:"read_timeout"`

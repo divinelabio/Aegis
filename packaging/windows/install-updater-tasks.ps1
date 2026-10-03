@@ -20,9 +20,17 @@ if (-not $SkipAdminCheck) {
 }
 
 $updater = Join-Path $InstallDir 'aegis-updater.exe'
-$config = Join-Path $InstallDir 'config.yaml'
+$config = Join-Path $InstallDir 'updater.yaml'
+if (-not (Test-Path -LiteralPath $config)) { $config = Join-Path $InstallDir 'config.yaml' }
 if (-not (Test-Path -LiteralPath $updater -PathType Leaf)) { throw "Missing signed updater: $updater" }
 if (-not (Test-Path -LiteralPath $config -PathType Leaf)) { throw "Missing config: $config" }
+
+$daemonAction = New-ScheduledTaskAction -Execute $updater -Argument "serve --config `"$config`"" -WorkingDirectory $InstallDir
+$daemonTrigger = New-ScheduledTaskTrigger -AtStartup
+$daemonPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$daemonSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -StartWhenAvailable
+Register-ScheduledTask -TaskName 'Aegis Release Updater' -Action $daemonAction -Trigger $daemonTrigger -Principal $daemonPrincipal -Settings $daemonSettings -Force | Out-Null
+Start-ScheduledTask -TaskName 'Aegis Release Updater'
 
 $geoAction = New-ScheduledTaskAction -Execute $updater -Argument "geo --config `"$config`"" -WorkingDirectory $InstallDir
 $geoTrigger = New-ScheduledTaskTrigger -Daily -At 3am

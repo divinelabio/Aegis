@@ -4,6 +4,8 @@
  */
 import { SectionUI } from './sections/ui-components.js';
 import { escapeSectionHtml } from './sections/section-runtime-helpers.js';
+import * as AdminDOM from './core/dom.js';
+import { notify } from './core/notify.js';
 /**
  * Displays a clean, executive modal when a commercial license is successfully activated.
  * Follows Aegis app UI cleanly without drifting content, neon green, or glow effects.
@@ -12,9 +14,9 @@ export function showLicenseCongratulationsModal(tier, details) {
     const normalizedTier = (tier || 'professional').toLowerCase();
     const isEnterprise = normalizedTier.includes('enterprise');
     const tierName = isEnterprise ? 'Enterprise' : 'Professional';
-    const isUpgradeRequired = (details?.status || '').toLowerCase() === 'upgrade_required';
+    const isUpgradeRequired = Boolean(details?.upgradeRequired || (details?.status || '').toLowerCase() === 'upgrade_required');
     const subtitleText = isUpgradeRequired
-        ? `Aegis ${tierName} license validated. Upgrade ready to enable all ${tierName} capabilities.`
+        ? (details?.upgradeReason || `Aegis ${tierName} license validated. Install the matching release to enable its capabilities.`)
         : `Aegis ${tierName} Edition is now active and protecting your workloads.`;
     // Exact commercial capabilities (OWASP CRS is free/community, so omitted; no buzzwords/ML)
     const capabilities = isEnterprise ? [
@@ -75,7 +77,7 @@ export function showLicenseCongratulationsModal(tier, details) {
       </div>
 
       <h2 style="font-size: 1.45rem; font-weight: 700; margin: 0 0 6px; color: var(--text-main, #ffffff); letter-spacing: -0.01em;">
-        License Activated
+        ${isUpgradeRequired ? 'License Validated' : 'License Activated'}
       </h2>
       <p style="color: var(--text-muted, #9ca3af); font-size: 0.88rem; margin: 0 0 18px; line-height: 1.45;">
         ${escapeSectionHtml(subtitleText)}
@@ -104,22 +106,22 @@ export function showLicenseCongratulationsModal(tier, details) {
 
       <!-- Action Button -->
       <button type="button" class="btn btn-primary" id="license-modal-action-btn" data-section-action="close-modal" style="width: 100%; padding: 11px 16px; font-size: 0.92rem; font-weight: 600; border-radius: 6px; cursor: pointer;">
-        ${isUpgradeRequired ? 'Review &amp; Apply Upgrade' : 'Go to Console'}
+        ${isUpgradeRequired ? (details?.upgradeReason ? 'Check release availability' : 'Review &amp; Apply Upgrade') : 'Go to Console'}
       </button>
     </div>
   `;
     SectionUI.showModal(content, { panelClass: 'modal-content license-modal-panel', closeOnBackdrop: true });
     if (isUpgradeRequired) {
-        const actionBtn = document.getElementById('license-modal-action-btn');
+        const actionBtn = AdminDOM.getById('license-modal-action-btn');
         if (actionBtn) {
             actionBtn.addEventListener('click', () => {
                 SectionUI.closeModal();
                 import('./system-update.js').then(({ checkSystemUpdates, openSystemUpdateModal }) => {
                     void checkSystemUpdates(true).then(status => {
-                        if (status)
+                        if (status?.update_available)
                             openSystemUpdateModal(status);
                         else
-                            openSystemUpdateModal();
+                            notify(status?.error || 'No compatible release is available. Refresh the licence after a release is published.', 'error');
                     });
                 });
             });

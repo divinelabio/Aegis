@@ -5,30 +5,86 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag (for example v1.0.3); never a branch'
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build-release:
     name: Build & Package Binaries
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate immutable release identity
+        run: |
+          set -euo pipefail
+          pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          [[ "$RELEASE_TAG" =~ $pattern ]] || { echo 'Release tag must be a full v-prefixed SemVer'; exit 1; }
+          [[ "$(git rev-parse HEAD)" == "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" ]]
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+          core_version="${RELEASE_TAG%%+*}"
+          if [[ "$core_version" == *-* ]]; then
+            echo 'RELEASE_PRERELEASE=true' >> "$GITHUB_ENV"
+          else
+            echo 'RELEASE_PRERELEASE=false' >> "$GITHUB_ENV"
+          fi
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Prevent replacing published release bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --output release-lookup.json --write-out '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")
+          case "$status" in
+            404) ;;
+            200) python3 -c 'import json; r=json.load(open("release-lookup.json")); assert not r["assets"], "Release already has published assets; use a new version"' ;;
+            *) echo "Release lookup failed (HTTP $status); refusing to publish"; exit 1 ;;
+          esac
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: 'go.mod'
           check-latest: true
+
+      - name: Verify release source
+        run: go test ./...
+
+      - name: Build admin UI from release source
+        run: |
+          npm ci
+          npm run admin:build
+
+      - name: Set up image emulation
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up image builder
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Matrix
         run: |
+          set -euo pipefail
           mkdir -p bin-dist
 
           stage_assets() {
-            cp config.yaml bin-dist/ 2>/dev/null || true
+            cp config.yaml bin-dist/
             mkdir -p bin-dist/data/rules bin-dist/rules
             if [ -d "data/rules" ]; then
               cp -r data/rules/. bin-dist/data/rules/
@@ -39,16 +95,16 @@ jobs:
             fi
           }
 
-          LDFLAGS="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }} -X github.com/divinelabio/aegis/internal/core/admin.Version=${{ github.ref_name }} -X github.com/divinelabio/aegis/internal/core/admin/handlers.Version=${{ github.ref_name }}"
+          LDFLAGS="-s -w -X main.Version=$RELEASE_VERSION -X main.BuildDate=$BUILD_DATE"
 
           # 1. Linux amd64
           echo "Building Linux amd64..."
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis ./cmd/aegis-server
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis-updater ./cmd/aegis-updater 2>/dev/null || true
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegisctl ./cmd/aegisctl
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis-updater ./cmd/aegis-updater
           cp bin-dist/aegis aegis-linux-amd64
-          cp bin-dist/aegisctl aegisctl-linux-amd64 2>/dev/null || true
-          cp bin-dist/aegis-updater aegis-updater-linux-amd64 2>/dev/null || true
+          cp bin-dist/aegisctl aegisctl-linux-amd64
+          cp bin-dist/aegis-updater aegis-updater-linux-amd64
           stage_assets
           tar -czf aegis-linux-amd64.tar.gz -C bin-dist .
           rm -rf bin-dist/*
@@ -56,11 +112,11 @@ jobs:
           # 2. Linux arm64
           echo "Building Linux arm64..."
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis ./cmd/aegis-server
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegisctl ./cmd/aegisctl 2>/dev/null || true
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${{ github.ref_name }} -X main.version=${{ github.ref_name }}" -o bin-dist/aegis-updater ./cmd/aegis-updater 2>/dev/null || true
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin-dist/aegisctl ./cmd/aegisctl
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis-updater ./cmd/aegis-updater
           cp bin-dist/aegis aegis-linux-arm64
-          cp bin-dist/aegisctl aegisctl-linux-arm64 2>/dev/null || true
-          cp bin-dist/aegis-updater aegis-updater-linux-arm64 2>/dev/null || true
+          cp bin-dist/aegisctl aegisctl-linux-arm64
+          cp bin-dist/aegis-updater aegis-updater-linux-arm64
           stage_assets
           tar -czf aegis-linux-arm64.tar.gz -C bin-dist .
           rm -rf bin-dist/*
@@ -68,21 +124,46 @@ jobs:
           # 3. Windows amd64
           echo "Building Windows amd64..."
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis.exe ./cmd/aegis-server
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegisctl.exe ./cmd/aegisctl
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o bin-dist/aegis-updater.exe ./cmd/aegis-updater
           cp bin-dist/aegis.exe aegis-windows-amd64.exe
           stage_assets
+          cp packaging/windows/install-native.ps1 bin-dist/
+          cp packaging/windows/install-updater-tasks.ps1 bin-dist/
           (cd bin-dist && zip -r ../aegis-windows-amd64.zip .)
           rm -rf bin-dist/*
 
           # Generate Checksums
-          sha256sum aegis-linux-amd64.tar.gz aegis-linux-arm64.tar.gz aegis-windows-amd64.zip aegis-linux-amd64 aegis-linux-arm64 aegis-windows-amd64.exe > checksums.txt
+          for arch in amd64 arm64; do
+            image="aegis-community:${RELEASE_VERSION}-${arch}"
+            docker buildx build --platform "linux/$arch" --load --build-arg "VERSION=$RELEASE_VERSION" --build-arg "BUILD_DATE=$BUILD_DATE" -t "$image" .
+            docker save "$image" | gzip > "aegis-docker-linux-${arch}.tar.gz"
+          done
+          sha256sum aegis-linux-amd64.tar.gz aegis-linux-arm64.tar.gz aegis-docker-linux-amd64.tar.gz aegis-docker-linux-arm64.tar.gz aegis-windows-amd64.zip aegis-linux-amd64 aegis-linux-arm64 aegisctl-linux-amd64 aegisctl-linux-arm64 aegis-updater-linux-amd64 aegis-updater-linux-arm64 aegis-windows-amd64.exe > checksums.txt
+
+      - name: Verify packaged version and trust
+        run: |
+          set -euo pipefail
+          chmod +x aegis-linux-amd64 aegisctl-linux-amd64 aegis-updater-linux-amd64
+          ./aegis-linux-amd64 --build-info | python3 -c 'import json,os,sys; b=json.load(sys.stdin); assert b["version"] == os.environ["RELEASE_VERSION"]; assert b["build_tier"] == "community"'
+          ./aegis-updater-linux-amd64 version | grep -F "aegis-updater $RELEASE_VERSION ("
+          ./aegisctl-linux-amd64 version | python3 -c 'import json,os,sys; assert json.load(sys.stdin)["version"] == os.environ["RELEASE_VERSION"]'
+          docker run --rm "aegis-community:${RELEASE_VERSION}-amd64" --build-info | python3 -c 'import json,os,sys; b=json.load(sys.stdin); assert b["version"] == os.environ["RELEASE_VERSION"]; assert b["build_tier"] == "community"'
+          sha256sum --check checksums.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          overwrite_files: false
+          prerelease: ${{ env.RELEASE_PRERELEASE == 'true' }}
+          make_latest: ${{ env.RELEASE_PRERELEASE == 'true' && 'false' || 'legacy' }}
+          fail_on_unmatched_files: true
           files: |
             aegis-linux-amd64.tar.gz
             aegis-linux-arm64.tar.gz
+            aegis-docker-linux-amd64.tar.gz
+            aegis-docker-linux-arm64.tar.gz
             aegis-windows-amd64.zip
             aegis-linux-amd64
             aegis-linux-arm64

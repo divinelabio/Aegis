@@ -23,6 +23,7 @@ export interface SystemUpdateStatus {
   channel: string;
   current_channel?: string;
   target_tier?: string;
+  minimum_updater_version?: string;
   is_tier_upgrade?: boolean;
   checked_at: string;
   updater_configured: boolean;
@@ -32,6 +33,7 @@ export interface SystemUpdateStatus {
 const UPDATE_DISMISS_KEY = 'aegis-update-dismissed-ver';
 let currentUpdateStatus: SystemUpdateStatus | null = null;
 let updateBannerBound = false;
+let updateCheckSequence = 0;
 
 // Monochrome SVG icon definitions (strict zero-emoji & zero-color policy)
 const updateIcons = {
@@ -58,11 +60,14 @@ function escapeHtml(str: string): string {
  * Fetch update status from the backend API.
  */
 export async function checkSystemUpdates(force = false): Promise<SystemUpdateStatus | null> {
+  const sequence = ++updateCheckSequence;
   try {
     const url = force ? 'system/update/check?force=true' : 'system/update/check';
     const res = await api.get<SystemUpdateStatus>(url);
+    if (sequence !== updateCheckSequence) return null;
     if (res && res.current_version) {
       currentUpdateStatus = res;
+      renderUpdateBanner(res);
       return res;
     }
   } catch (err) {
@@ -104,7 +109,7 @@ export function renderUpdateBanner(status: SystemUpdateStatus): void {
 
   const isCritical = status.severity === 'critical';
   const isTierUpgrade = Boolean(status.is_tier_upgrade || (status.channel && status.current_channel && status.channel.toLowerCase() !== status.current_channel.toLowerCase()));
-  const severityLabel = isTierUpgrade ? 'Edition Upgrade Ready' : (isCritical ? 'Critical Security Update' : 'Update Available');
+  const severityLabel = isTierUpgrade ? 'Edition Change Ready' : (isCritical ? 'Critical Security Update' : 'Update Available');
   const severityPillClass = isCritical ? 'update-pill-critical' : 'update-pill-recommended';
 
   container.className = `system-update-banner ${isCritical ? 'is-critical' : ''}`;
@@ -150,6 +155,7 @@ export function openSystemUpdateModal(overrideStatus?: SystemUpdateStatus): void
   if (!status) {
     return;
   }
+  if (!status.update_available) return;
 
   const isTierUpgrade = Boolean(status.is_tier_upgrade || (status.channel && status.current_channel && status.channel.toLowerCase() !== status.current_channel.toLowerCase()));
   const isCommunity = !isTierUpgrade && (!status.channel || status.channel.toLowerCase() === 'community');
@@ -158,7 +164,7 @@ export function openSystemUpdateModal(overrideStatus?: SystemUpdateStatus): void
     ? `<ul class="update-modal-highlights">
         ${status.highlights.map(h => `<li>${escapeHtml(h)}</li>`).join('')}
        </ul>`
-    : `<p class="update-modal-desc">${isTierUpgrade ? 'Upgrade ready to activate commercial capabilities on this installation.' : 'This release includes stability, performance, and security enhancements.'}</p>`;
+    : `<p class="update-modal-desc">${isTierUpgrade ? 'Install the edition authorized by this license.' : 'This release includes stability, performance, and security enhancements.'}</p>`;
 
   const changelogLink = status.changelog_url
     ? `<a href="${escapeHtml(status.changelog_url)}" target="_blank" rel="noopener noreferrer" class="update-modal-link">
@@ -172,8 +178,8 @@ export function openSystemUpdateModal(overrideStatus?: SystemUpdateStatus): void
         ${updateIcons.arrowUpCircle}
       </div>
       <div class="section-confirm-title-block">
-        <h3 class="section-confirm-title">${isTierUpgrade ? 'Aegis Edition Upgrade' : 'Software Update'}</h3>
-        <p class="section-confirm-sub">${isTierUpgrade ? 'Review licensed capabilities and transition this node to the commercial edition.' : 'Review release highlights and apply the update to this installation.'}</p>
+        <h3 class="section-confirm-title">${isTierUpgrade ? 'Aegis Edition Change' : 'Software Update'}</h3>
+        <p class="section-confirm-sub">${isTierUpgrade ? 'Review the licensed edition and install it on this node.' : 'Review release highlights and apply the update to this installation.'}</p>
       </div>
       <button type="button" class="section-confirm-close" data-section-action="close-modal" aria-label="Close dialog">${updateIcons.x}</button>
     </div>
@@ -197,9 +203,10 @@ export function openSystemUpdateModal(overrideStatus?: SystemUpdateStatus): void
       </div>
 
       <!-- Release Summary -->
+    ${status.error ? `<p class="update-daemon-note" role="alert">${escapeHtml(status.error)}</p>` : ''}
       <div class="update-release-card">
         <div class="update-release-header">
-          <span class="update-release-title">${escapeHtml(status.title || (isTierUpgrade ? `Aegis ${status.channel} Upgrade` : `Aegis ${status.latest_version}`))}</span>
+          <span class="update-release-title">${escapeHtml(status.title || (isTierUpgrade ? `Install Aegis ${status.channel}` : `Aegis ${status.latest_version}`))}</span>
           ${status.release_date ? `<span class="update-release-date">Released: ${escapeHtml(status.release_date)}</span>` : ''}
         </div>
         ${highlightsHtml}
@@ -208,7 +215,7 @@ export function openSystemUpdateModal(overrideStatus?: SystemUpdateStatus): void
 
       <!-- Safety Checklist & Instructions -->
       <div class="update-safety-box">
-        <div class="update-safety-title">${isCommunity ? 'Upgrade Instructions (Community Edition)' : (isTierUpgrade ? 'Commercial Tier Upgrade Guarantees' : 'Operational Guarantees')}</div>
+        <div class="update-safety-title">${isCommunity ? 'Upgrade Instructions (Community Edition)' : 'Installation and recovery'}</div>
         <div class="update-safety-item">
           <span class="update-safety-check">${updateIcons.check}</span>
           <span>${isCommunity ? 'Docker Deployments: Run <code>docker compose pull &amp;&amp; docker compose up -d</code>.' : 'Configuration (<code>/etc/aegis/config.yaml</code>) remains preserved and valid.'}</span>
@@ -227,7 +234,7 @@ export function openSystemUpdateModal(overrideStatus?: SystemUpdateStatus): void
         <div class="update-daemon-note" style="margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: rgba(249, 115, 22, 0.08); border: 1px solid rgba(249, 115, 22, 0.25); font-size: 0.8rem; line-height: 1.4; color: var(--text-main, #f3f4f6);">
           <strong>Note:</strong> Automated updater daemon (<code>aegis-updater</code>) is not connected. To upgrade this installation:
           <ul style="margin: 6px 0 0 16px; padding: 0;">
-            <li><strong>Docker:</strong> Update container image to the commercial release image (e.g. <code>aegis-${escapeHtml((status.channel || 'pro').toLowerCase())}:${escapeHtml(status.latest_version)}</code>) and run <code>docker compose up -d</code>.</li>
+            <li><strong>Docker:</strong> Obtain the official ${escapeHtml(status.channel || 'commercial')} image for this release, update the deployment image, and recreate the container.</li>
             <li><strong>Linux host:</strong> Replace the binary with the ${escapeHtml(status.channel || 'commercial')} release and run <code>systemctl restart aegis</code>.</li>
           </ul>
         </div>
@@ -248,10 +255,10 @@ export function openSystemUpdateModal(overrideStatus?: SystemUpdateStatus): void
            </a>`
         : (status.updater_configured
             ? `<button type="button" class="btn btn-primary" id="update-apply-btn">
-                 ${isTierUpgrade ? 'Upgrade &amp; restart Aegis' : 'Install &amp; restart Aegis'}
+                 Install &amp; restart Aegis
                </button>`
             : `<a href="${escapeHtml(status.changelog_url || 'https://github.com/divinelabio/aegis/releases')}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" id="update-github-link">
-                 View Release Artifacts <span class="link-icon">${updateIcons.externalLink}</span>
+                 View Release Notes <span class="link-icon">${updateIcons.externalLink}</span>
                </a>`
           )}
     </div>
@@ -287,31 +294,40 @@ async function runSystemUpdateExecution(
   if (progressContainer) progressContainer.classList.remove('hidden');
 
   if (progressStatus) {
+    progressStatus.classList.remove('text-danger');
     progressStatus.textContent = 'Connecting to aegis-updater daemon...';
   }
 
   try {
-    const res = await api.post<{ ok: boolean; message?: string; error?: string; status?: { job_id?: string; state: string } }>('system/update/apply', {
+    const result = await api.requestResult<{ ok: boolean; message?: string; error?: string; status?: { job_id?: string; state: string } }>('system/update/apply', 'POST', {
       version: status.latest_version,
+      target_tier: status.target_tier || status.channel,
     });
+    if (result.error) throw new Error(result.error.message);
+    const res = result.data;
 
     if (res && typeof res === 'object' && res.ok) {
       if (progressStatus) {
         progressStatus.textContent = 'Upgrade queued. Downloading and verifying the release...';
       }
       const jobId = res.status?.job_id;
+      if (!jobId) throw new Error('The updater did not return a job identifier. Check its status before retrying.');
       const deadline = Date.now() + 16 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         // A restart can interrupt polling. The job continues in the updater.
-        let job: { available: boolean; status?: { job_id?: string; state: string; last_error?: string } } | null = null;
-        try { job = await api.post('license/updater-status'); } catch { /* reconnect on the next poll */ }
-        if (!job?.available || !job.status) {
+        const polled = await api.requestResult<{ available: boolean; status?: { job_id?: string; state: string; last_error?: string; version?: string; edition?: string } }>('license/updater-status', 'POST', undefined, { signal: AbortSignal.timeout(10000) });
+        if (polled.error && [401, 403].includes(polled.error.status)) throw new Error(polled.error.message);
+        const job = polled.data;
+        if (!job || !job.available || !job.status) {
           if (progressStatus) progressStatus.textContent = 'Aegis is restarting. Reconnecting...';
           continue;
         }
         if (jobId && job.status.job_id !== jobId) throw new Error('The updater job changed. Refresh the page to review its status.');
         if (job.status.state === 'active') {
+          if (job.status.version?.replace(/^v/, '') !== status.latest_version.replace(/^v/, '') || job.status.edition !== (status.target_tier || status.channel)) {
+            throw new Error('The updater completed a different release. Refresh the page to review the running version.');
+          }
           if (progressStatus) progressStatus.textContent = 'Upgrade verified successfully. Reloading...';
           window.location.reload();
           return;
@@ -340,6 +356,13 @@ async function runSystemUpdateExecution(
 function bindUpdateBannerEvents(): void {
   if (updateBannerBound) return;
   updateBannerBound = true;
+  document.addEventListener('aegis:license-changed', () => {
+    updateCheckSequence++;
+    currentUpdateStatus = null;
+    const container = AdminDOM.getById('system-update-banner');
+    if (container) { container.classList.add('hidden'); container.innerHTML = ''; }
+    void checkSystemUpdates();
+  });
 
   AdminEvents.delegateEvent<HTMLElement>(document, 'click', '[data-action]', (e, target) => {
     const action = target.getAttribute('data-action');

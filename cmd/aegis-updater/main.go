@@ -2,16 +2,13 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/divinelabio/aegis/internal/buildinfo"
-	"github.com/divinelabio/aegis/internal/licensing"
 	"github.com/divinelabio/aegis/internal/maintenance"
 )
 
@@ -47,16 +44,9 @@ func main() {
 	defer cancel()
 	switch command {
 	case "serve":
-		var keys map[string]ed25519.PublicKey
-		if ArtifactRootPublicKey != "" {
-			var keyErr error
-			keys, keyErr = licensing.CertifiedTrustedKeys(ArtifactRootPublicKey, ArtifactSignedKeySet, licensing.KeyPurposeArtifact, time.Now().UTC())
-			if keyErr != nil {
-				err = keyErr
-				break
-			}
-		}
-		daemon := maintenance.ReleaseDaemon{Config: cfg.Updater, Version: Version, Verifier: maintenance.ManifestVerifier{Issuer: ArtifactIssuer, Audience: ArtifactAudience, Keys: keys}}
+		// Validate signer certificates for every upgrade, allowing status and
+		// rollback to remain available if the embedded signer has expired.
+		daemon := maintenance.ReleaseDaemon{Config: cfg.Updater, Version: Version, Verifier: maintenance.ManifestVerifier{Issuer: ArtifactIssuer, Audience: ArtifactAudience, RootPublicKey: ArtifactRootPublicKey, SignedKeySet: ArtifactSignedKeySet}}
 		err = daemon.Serve(ctx)
 	case "status":
 		var response maintenance.UpdaterResponse

@@ -94,14 +94,18 @@ func initializeCommunityLicensing(ctxRaw, cfgRaw, _, loggerRaw interface{}, vers
 	}
 
 	realManager, err := licensing.NewManager(licensing.Config{
-		StateDir:         stateDir,
-		APIURL:           apiURL,
-		Issuer:           issuer,
-		Audience:         LicenseAudience,
-		Version:          version,
-		CompiledTier:     compiledTier,
-		CompiledFeatures: compiledFeatures,
-		TrustedKeys:      trustedKeys,
+		StateDir:           stateDir,
+		APIURL:             apiURL,
+		Issuer:             issuer,
+		Audience:           LicenseAudience,
+		Version:            version,
+		UpdaterVersionFunc: configuredUpdaterVersion(cfgRaw),
+		ArtifactFormat:     configuredArtifactFormat(cfgRaw),
+		CompiledTier:       compiledTier,
+		CompiledFeatures:   compiledFeatures,
+		TrustedKeys:        trustedKeys,
+		RootPublicKey:      rootPubKey,
+		SignedKeySet:       signedKeySet,
 	})
 	if err != nil {
 		logger.Error("Failed to initialize licence manager", zap.Error(err))

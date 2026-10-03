@@ -204,7 +204,12 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to initialize PostgreSQL control database", zap.Error(err))
 	}
-	defer storage.CloseControlDB()
+	defer func() {
+		// Workers can retain pooled connections until their lifetime ends.
+		// Cancel them before waiting for the pool to close, including early exits.
+		cancel()
+		storage.CloseControlDB()
+	}()
 	userRepo, err := user.NewPostgreSQLRepository(ctx, controlDB)
 	if err != nil {
 		logger.Fatal("Failed to initialize PostgreSQL control repository", zap.Error(err))
@@ -1068,6 +1073,8 @@ func main() {
 		break
 	}
 
+	// Stop context-owned workers before draining services and their database pool.
+	cancel()
 	shutdownCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel2()
 	if err := sectionMgr.Stop(shutdownCtx); err != nil {

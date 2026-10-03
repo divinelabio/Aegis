@@ -38,14 +38,20 @@ type persistedState struct {
 	LastObservedAt time.Time     `json:"last_observed_at,omitempty"`
 	LastRefresh    time.Time     `json:"last_refresh,omitempty"`
 	Upgrade        storedUpgrade `json:"upgrade,omitempty"`
+	SignedKeySet   string        `json:"signed_key_set,omitempty"`
+	// Seats superseded by a committed activation or rejected during validation.
+	// Keep their IDs until an idempotent authority DELETE has succeeded.
+	PendingDeactivations []string `json:"pending_deactivations,omitempty"`
 }
 
 // Persist only release metadata. Short-lived download credentials are refreshed
 // immediately before installation and never saved to disk.
 type storedUpgrade struct {
-	TargetTier    string `json:"target_tier,omitempty"`
-	TargetVersion string `json:"target_version,omitempty"`
-	Manifest      string `json:"manifest,omitempty"`
+	ArtifactStatus        string `json:"artifact_status,omitempty"`
+	MinimumUpdaterVersion string `json:"minimum_updater_version,omitempty"`
+	TargetTier            string `json:"target_tier,omitempty"`
+	TargetVersion         string `json:"target_version,omitempty"`
+	Manifest              string `json:"manifest,omitempty"`
 }
 
 var identityMu sync.Mutex
@@ -53,6 +59,9 @@ var identityMu sync.Mutex
 func stableRuntimeID(installationID string) string {
 	hostname, _ := os.Hostname()
 	machine, _ := os.ReadFile("/etc/machine-id")
+	if hostMachine, err := os.ReadFile("/etc/aegis/host-machine-id"); err == nil && len(hostMachine) > 0 {
+		machine = hostMachine
+	}
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(installationID+"/"+hostname+"/"+strings.TrimSpace(string(machine)))).String()
 }
 

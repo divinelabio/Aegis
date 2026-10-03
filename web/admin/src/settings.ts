@@ -214,6 +214,7 @@ type LicenseSnapshot = {
     state?: string;
     target_tier?: string;
     target_version?: string;
+    minimum_updater_version?: string;
   };
 };
 
@@ -1818,7 +1819,7 @@ function renderLicenseSettings(): string {
   const upgrade = license.upgrade || {};
   const normalizedStatus = license.status.toLowerCase();
   const isCommunityBuild = (license.build_tier || '').toLowerCase() === 'community';
-  const isActivated = ['active', 'grace', 'past_due', 'upgrade_required', 'deactivation_pending'].includes(normalizedStatus);
+  const isActivated = Boolean(license.activation_id);
   const statusTone = ['active', 'grace'].includes(normalizedStatus) ? 'is-positive' : normalizedStatus === 'community' ? 'is-neutral' : 'is-warning';
   const upgradeNotice = upgrade.required
     ? `<div class="settings-section license-upgrade-notice">
@@ -1846,14 +1847,15 @@ function renderLicenseSettings(): string {
         </div>
       </div>
       <div class="settings-section license-action-panel">
-        <div class="settings-section-title">${isActivated ? 'Replace licence' : 'Activate this installation'}</div>
+        <div class="settings-section-title">${isActivated ? 'Manage this licence' : 'Activate this installation'}</div>
+        ${isActivated ? '<p class="settings-hint">Deactivate this installation before entering a different licence key.</p>' : ''}
         ${communityHint}
         <div class="settings-field">
           <label for="aegis-license-key">Licence key</label>
           <input id="aegis-license-key" class="settings-input text-mono" type="password" autocomplete="off" spellcheck="false" data-settings-transient placeholder="AEGIS-PRO-…">
         </div>
         <div class="settings-inline-actions">
-          <button class="btn" type="button" data-settings-action="activate-license" data-license-action>${isActivated ? 'Replace licence' : 'Activate licence'}</button>
+          <button class="btn" type="button" data-settings-action="activate-license" data-license-action ${isActivated ? 'disabled' : ''}>Activate licence</button>
           ${isActivated ? '<button class="btn btn-outline" type="button" data-settings-action="refresh-license" data-license-action>Refresh now</button>' : ''}
         </div>
         ${isActivated ? `<div class="license-danger-actions"><div><strong>Deactivate this installation</strong><span>Remove the current licence from Aegis.</span></div><button class="btn btn-outline btn-danger" type="button" data-settings-action="deactivate-license" data-license-action>Deactivate licence</button></div>` : ''}
@@ -1916,7 +1918,7 @@ async function applyUpgrade(): Promise<void> {
   if (status) {
     openSystemUpdateModal(status);
   } else {
-    openSystemUpdateModal();
+    notify('Could not retrieve upgrade details. Check the licence status and try again.', 'error');
   }
 }
 
@@ -1956,11 +1958,20 @@ async function activateLicense(): Promise<void> {
     currentLicense = res.data.license;
     renderLicensePanel();
     notifyLicenseChanged();
-    void checkSystemUpdates(true);
+    if (res.data.license.upgrade?.required && res.data.license.upgrade.available) {
+      const updateStatus = await checkSystemUpdates(true);
+      if (updateStatus?.update_available) {
+        settingsShowToast('Licence accepted; review the matching release before installing', 'success');
+        openSystemUpdateModal(updateStatus);
+        return;
+      }
+    }
     showLicenseCongratulationsModal(res.data.license.licensed_tier || res.data.license.effective_tier || 'professional', {
       expiresAt: res.data.license.expires_at,
       offlineUntil: res.data.license.offline_until,
-      status: res.data.license.status
+      status: res.data.license.status,
+      upgradeRequired: res.data.license.upgrade?.required,
+      upgradeReason: res.data.license.upgrade?.available ? undefined : res.data.license.upgrade?.reason
     });
     settingsShowToast(res.data.license.upgrade?.required
       ? (res.data.license.upgrade.available ? 'Licence accepted; upgrade is ready' : 'Licence accepted; awaiting a compatible release')

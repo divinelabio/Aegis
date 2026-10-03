@@ -669,8 +669,11 @@ configure_parameters() {
 # Deployment: Docker Compose
 # ------------------------------------------------------------------------------
 deploy_docker_stack() {
+	getent group aegis >/dev/null || groupadd --system aegis
     log_step "Deploying Aegis stack via Docker Compose..."
     mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
+    # Release containers run as the fixed, unprivileged Aegis identity.
+    chown -R 65532:65532 "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
     if [[ -d "./data/rules" ]]; then
         cp -r "./data/rules" "${INSTALL_DIR}/data/" 2>/dev/null || true
     fi
@@ -682,12 +685,15 @@ version: '3.8'
 
 services:
   aegis:
-    image: ${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis}:${AEGIS_VERSION:-latest}
+    image: ${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis:latest}
     container_name: aegis
+    hostname: aegis
     restart: unless-stopped
     ports:
       - "${SERVER_PORT:-8080}:8080"
       - "${SERVER_ADMIN_PORT:-8081}:8081"
+    group_add:
+      - "${AEGIS_UPDATER_GID}"
     environment:
       - AEGIS_ADMIN_PASSWORD=${AEGIS_ADMIN_PASSWORD}
       - AEGIS_CONTROL_DB_PASSWORD=${AEGIS_CONTROL_DB_PASSWORD}
@@ -700,6 +706,8 @@ services:
       - ./data:/var/lib/aegis/data
       - ./data/rules:/var/lib/aegis/data/rules:ro
       - ./logs:/var/lib/aegis/logs
+      - /run/aegis:/run/aegis
+      - /etc/machine-id:/etc/aegis/host-machine-id:ro
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -762,14 +770,16 @@ COMPOSE_EOF
     cat << ENV_EOF > .env
 SERVER_PORT=${PROXY_PORT}
 SERVER_ADMIN_PORT=${ADMIN_PORT}
-AEGIS_IMAGE=${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis}
+AEGIS_IMAGE=${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis:${AEGIS_VERSION:-latest}}
 AEGIS_VERSION=${AEGIS_VERSION:-latest}
 AEGIS_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 AEGIS_CONTROL_DB_PASSWORD=${POSTGRES_PASSWORD}
+AEGIS_CONTROL_DB_NAME=${POSTGRES_DB}
 AEGIS_ANALYTICS_DB_PASSWORD=${CLICKHOUSE_PASSWORD}
 AEGIS_JWT_SECRET=${JWT_SECRET}
 AEGIS_DEV_MODE=enterprise
 AEGIS_LICENSE_KEY=${LICENSE_KEY}
+AEGIS_UPDATER_GID=$(getent group aegis | cut -d: -f3)
 ENV_EOF
     chmod 600 .env
 
@@ -780,8 +790,13 @@ server:
   admin:
     host: "0.0.0.0"
     port: 8081
+    username: "${ADMIN_USER}"
     setup_completed: true
     secure_cookies: false
+
+updater:
+  socket_path: /run/aegis/updater.sock
+  mode: docker
 
 storage:
   control:
@@ -789,7 +804,7 @@ storage:
     driver: postgresql
     host: postgres
     port: 5432
-    database: aegis_control
+    database: ${POSTGRES_DB}
     username: aegis
     password_secret_ref: env:AEGIS_CONTROL_DB_PASSWORD
     ssl_mode: disable
@@ -852,21 +867,131 @@ sections:
 CONFIG_EOF
 
     log_info "Pulling container images and launching services..."
-    docker compose pull --quiet
-    docker compose up -d
+    install_docker_updater
+    local docker_archive docker_image
+    docker_archive="$(mktemp)"
+    download_community_archive "aegis-docker-linux-${ARCH}.tar.gz" "$docker_archive"
+    docker load --input "$docker_archive" || fatal "Could not load the Community Docker release."
+    rm -f "$docker_archive"
+    local docker_version="${AEGIS_VERSION#v}"
+    [[ "$docker_version" != "latest" ]] || docker_version="1.0.2"
+    docker_image="$(docker image inspect "aegis-community:${docker_version}-${ARCH}" --format '{{.Id}}')" || fatal "Community Docker image is missing."
+    [[ "$docker_image" =~ ^sha256:[a-f0-9]{64}$ ]] || fatal "Invalid Community Docker image identity."
+    printf '\nAEGIS_IMAGE=%s\n' "$docker_image" >> .env
+    cp .env release.env
+    chmod 600 release.env
+    docker compose --env-file release.env pull --quiet postgres clickhouse
+    docker compose --env-file release.env up -d
 
     log_info "Waiting for services to become healthy..."
     local attempts=0
     local max_attempts=30
     while [[ $attempts -lt $max_attempts ]]; do
-        if (curl -s "http://127.0.0.1:${ADMIN_PORT}/" >/dev/null 2>&1) || (docker compose ps aegis 2>/dev/null | grep -q "Up"); then
+        if curl --fail --silent "http://127.0.0.1:${PROXY_PORT}/health/ready" >/dev/null; then
             break
         fi
         sleep 2
         attempts=$((attempts + 1))
     done
+	[[ $attempts -lt $max_attempts ]] || fatal "Docker services did not become ready. Check docker compose --env-file release.env logs."
 
     log_success "Docker stack deployed and operational."
+}
+
+# The host updater owns Docker operations; the application receives only its
+# restricted socket. Docker's administrative socket is never mounted in Aegis.
+community_release_base() {
+    local release_version="${AEGIS_VERSION#v}"
+    [[ "$release_version" != "latest" ]] || fatal "Resolve the release version before downloading components."
+    if [[ -n "${AEGIS_DOWNLOAD_BASE:-}" ]]; then
+        printf '%s/releases/%s' "$AEGIS_DOWNLOAD_BASE" "$release_version"
+    else
+        printf 'https://github.com/%s/releases/download/v%s' "$GITHUB_REPO" "$release_version"
+    fi
+}
+
+resolve_community_version() {
+    if [[ "$AEGIS_VERSION" == "latest" ]]; then
+        local metadata
+        metadata="$(curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            "https://api.github.com/repos/${GITHUB_REPO}/releases/latest")" || fatal "Could not resolve the latest Community release. Set AEGIS_VERSION to a published version to retry."
+        AEGIS_VERSION="$(printf '%s' "$metadata" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    fi
+    AEGIS_VERSION="${AEGIS_VERSION#v}"
+    local semver_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+    [[ "$AEGIS_VERSION" =~ $semver_pattern ]] || fatal "AEGIS_VERSION must be a full semantic version."
+}
+
+# checksums.txt must be copied unchanged from the matching official release.
+download_community_archive() {
+    local name="$1" destination="$2" release_base checksum_file expected actual
+    release_base="$(community_release_base)"
+    checksum_file="${destination}.checksums"
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+        "${release_base}/checksums.txt" -o "$checksum_file" || fatal "Release checksums are unavailable; installation stopped."
+    expected="$(awk -v name="$name" '$2 == name || $2 == "*" name { print $1 }' "$checksum_file")"
+    [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || fatal "Release checksum entry is missing, duplicated, or invalid."
+    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+        "${release_base}/${name}" -o "$destination" || fatal "Could not download the selected complete release."
+    actual="$(sha256sum "$destination")"
+    [[ "${actual%% *}" == "${expected,,}" ]] || fatal "Release checksum mismatch; installation stopped."
+    rm -f "$checksum_file"
+}
+
+install_docker_updater() {
+    command -v systemctl >/dev/null || fatal "Automatic Docker upgrades require systemd on the host."
+    local release_base
+    release_base="$(community_release_base)"
+    local updater_archive
+    updater_archive="$(mktemp -d)"
+    download_community_archive "aegis-linux-${ARCH}.tar.gz" "${updater_archive}/release.tar.gz"
+    tar -xzf "${updater_archive}/release.tar.gz" -C "$updater_archive"
+    [[ -s "${updater_archive}/aegis-updater" ]] || fatal "The host updater is missing from the release package."
+    if [[ ! -d "${INSTALL_DIR}/data/rules" && -d "${updater_archive}/data/rules" ]]; then
+        cp -r "${updater_archive}/data/rules" "${INSTALL_DIR}/data/"
+    fi
+    chown -R 65532:65532 "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
+    install -m 755 "${updater_archive}/aegis-updater" "${INSTALL_DIR}/aegis-updater"
+    mkdir -p /etc/aegis /run/aegis /var/lib/aegis /var/lib/aegis-updater
+    chown root:root /var/lib/aegis-updater
+    chmod 700 /var/lib/aegis-updater
+    chown root:aegis /run/aegis
+    chmod 750 /run/aegis
+    cp .env "${INSTALL_DIR}/release.env"
+    chmod 600 "${INSTALL_DIR}/release.env"
+    cat > /etc/aegis/updater.yaml << UPDATER_CONFIG
+updater:
+  mode: docker
+  socket_path: /run/aegis/updater.sock
+  state_path: /var/lib/aegis-updater/updater-state.json
+  releases_root: ${INSTALL_DIR}/releases
+  compose_path: ${INSTALL_DIR}/docker-compose.yml
+  compose_service: aegis
+  release_env_path: ${INSTALL_DIR}/release.env
+  health_url: http://127.0.0.1:${PROXY_PORT}/health
+UPDATER_CONFIG
+    cat > /etc/systemd/system/aegis-updater.service << UPDATER_SERVICE
+[Unit]
+Description=Aegis host release updater
+After=network-online.target docker.service
+Requires=docker.service
+[Service]
+Type=simple
+User=root
+Group=aegis
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=${INSTALL_DIR}/aegis-updater serve --config /etc/aegis/updater.yaml
+Restart=on-failure
+RestartSec=3
+UMask=0027
+RuntimeDirectory=aegis
+RuntimeDirectoryMode=0750
+[Install]
+WantedBy=multi-user.target
+UPDATER_SERVICE
+    systemctl daemon-reload
+    systemctl enable aegis-updater
+    systemctl restart aegis-updater
 }
 
 # ------------------------------------------------------------------------------
@@ -874,148 +999,49 @@ CONFIG_EOF
 # ------------------------------------------------------------------------------
 deploy_direct_binary() {
     log_step "Installing Aegis direct binary onto host system..."
-    mkdir -p "${INSTALL_DIR}/releases/initial" "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" /etc/aegis /var/lib/aegis
-    ln -sfn "${INSTALL_DIR}/releases/initial" "${INSTALL_DIR}/current"
-
-    # Create dedicated system user/group for security isolation
+    local native_release_dir="${INSTALL_DIR}/releases/initial-$(date +%s)-$$"
+    mkdir -p "$native_release_dir" "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" /etc/aegis /var/lib/aegis /var/lib/aegis-updater
+    chown root:root /var/lib/aegis-updater
+    chmod 700 /var/lib/aegis-updater
     if ! id -u aegis >/dev/null 2>&1; then
-        useradd -r -s /bin/false -d "${INSTALL_DIR}" -M aegis || true
+        useradd -r -s /bin/false -d "${INSTALL_DIR}" -M aegis
     fi
-
-    local bin_dest="${INSTALL_DIR}/releases/initial/aegis"
+    local bin_dest="${native_release_dir}/aegis"
     local updater_dest="${INSTALL_DIR}/aegis-updater"
-    local ctl_dest="${INSTALL_DIR}/aegisctl"
+    local ctl_dest="${native_release_dir}/aegisctl"
     local symlink_server="/usr/local/bin/aegis"
     local symlink_updater="/usr/local/bin/aegis-updater"
     local symlink_ctl="/usr/local/bin/aegisctl"
+    local release_base
+    release_base="$(community_release_base)"
+    local archive="${native_release_dir}/release.tar.gz"
+    download_community_archive "aegis-linux-${ARCH}.tar.gz" "$archive"
+    tar -xzf "$archive" -C "$native_release_dir" || fatal "Invalid release archive; the current installation was preserved."
+    rm -f "$archive"
+    local component
+    for component in aegis aegisctl aegis-updater; do
+        [[ -s "${native_release_dir}/${component}" ]] || fatal "The release is missing ${component}; the current installation was preserved."
+        chmod 755 "${native_release_dir}/${component}"
+    done
+    local build_info release_version
+    build_info="$("$bin_dest" --build-info)" || fatal "Could not inspect the downloaded release."
+    release_version="$(printf '%s' "$build_info" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    [[ "${release_version#v}" == "$AEGIS_VERSION" ]] || fatal "The release build version differs from the requested version."
+    [[ "$build_info" == *'"community"'* ]] || fatal "Bootstrap installation requires a Community release."
+    [[ "$("${native_release_dir}/aegis-updater" version)" == "aegis-updater ${release_version} "* ]] || fatal "The updater version differs from the server."
+    [[ "$("$ctl_dest" version)" == *"\"${release_version}\""* ]] || fatal "The CLI version differs from the server."
 
-    # Stop existing services and unlink destination binaries to prevent 'Text file busy'
+    # Download and validate every component before touching running services.
     if command -v systemctl >/dev/null 2>&1; then
         systemctl stop aegis aegis-updater 2>/dev/null || true
     fi
-    rm -f "$bin_dest" "$updater_dest" "$ctl_dest" 2>/dev/null || true
-
-    # Download or copy binary
-    local release_base="https://github.com/${GITHUB_REPO}/releases/latest/download"
-    log_info "Downloading or locating Aegis binary (${ARCH})..."
-    
-    local found_server=false
-    if curl -fsSL "${release_base}/aegis-linux-${ARCH}.tar.gz" -o "/tmp/aegis.tar.gz" 2>/dev/null; then
-        tar -xzf "/tmp/aegis.tar.gz" -C "${INSTALL_DIR}/releases/initial/"
-        rm -f "/tmp/aegis.tar.gz"
-        found_server=true
-    elif curl -fsSL "${release_base}/aegis-linux-${ARCH}" -o "$bin_dest" 2>/dev/null; then
-        found_server=true
-    fi
-
-    if ! $found_server; then
-        log_warn "Remote binary download skipped. Checking for local binary..."
-        local search_paths=(
-            "./aegis"
-            "./bin/aegis"
-            "./bin/linux_${ARCH}/aegis"
-            "./bin/linux-${ARCH}/aegis"
-            "../bin/aegis"
-            "../bin/linux_${ARCH}/aegis"
-            "../bin/linux-${ARCH}/aegis"
-            "$(dirname "$0")/../aegis"
-            "$(dirname "$0")/../bin/aegis"
-            "$(dirname "$0")/../bin/linux_${ARCH}/aegis"
-            "/home/aegis/aegis-community/bin/linux_${ARCH}/aegis"
-            "/home/aegis/aegis-community/aegis"
-        )
-        for candidate in "${search_paths[@]}"; do
-            if [[ -f "$candidate" ]]; then
-                log_info "Found local Aegis binary at: $candidate"
-                install -m 755 "$candidate" "$bin_dest" 2>/dev/null || cp -f "$candidate" "$bin_dest"
-                found_server=true
-                break
-            fi
-        done
-    fi
-
-    # Fallback: compile from source if Go is available and source directory exists
-    if ! $found_server && command -v go >/dev/null 2>&1; then
-        local src_dir="."
-        if [[ -d "$(dirname "$0")/cmd/aegis-server" ]]; then
-            src_dir="$(dirname "$0")"
-        fi
-        if [[ -d "${src_dir}/cmd/aegis-server" ]]; then
-            log_info "Detected Go environment and Aegis source tree. Building Aegis binary from source..."
-            if (cd "$src_dir" && go build -ldflags="-s -w" -o "$bin_dest" ./cmd/aegis-server); then
-                log_success "Successfully built Aegis server binary from source."
-                found_server=true
-            fi
-        fi
-    fi
-
-    if [[ ! -f "$bin_dest" ]]; then
-        fatal "Aegis binary was not found at '$bin_dest' and could not be downloaded from GitHub releases ($release_base). Please ensure network connectivity to GitHub or place the pre-built 'aegis' binary in the current directory."
-    fi
-
-    # Check for or copy aegis-updater
-    local search_updater=(
-        "./aegis-updater"
-        "./bin/aegis-updater"
-        "./bin/linux_${ARCH}/aegis-updater"
-        "./bin/linux-${ARCH}/aegis-updater"
-        "../bin/aegis-updater"
-        "../bin/linux_${ARCH}/aegis-updater"
-        "$(dirname "$0")/../aegis-updater"
-        "$(dirname "$0")/../bin/linux_${ARCH}/aegis-updater"
-        "/home/aegis/aegis-community/bin/linux_${ARCH}/aegis-updater"
-        "/home/aegis/aegis-community/aegis-updater"
-    )
-    for candidate_up in "${search_updater[@]}"; do
-        if [[ -f "$candidate_up" ]]; then
-            install -m 755 "$candidate_up" "$updater_dest" 2>/dev/null || cp -f "$candidate_up" "$updater_dest"
-            break
-        fi
-    done
-    if [[ ! -f "$updater_dest" ]]; then
-        curl -fsSL "${release_base}/aegis-updater-linux-${ARCH}" -o "$updater_dest" 2>/dev/null || true
-    fi
-
-    # Check for or copy aegisctl
-    local search_ctl=(
-        "./aegisctl"
-        "./bin/aegisctl"
-        "./bin/linux_${ARCH}/aegisctl"
-        "./bin/linux-${ARCH}/aegisctl"
-        "../bin/aegisctl"
-        "../bin/linux_${ARCH}/aegisctl"
-        "$(dirname "$0")/../aegisctl"
-        "$(dirname "$0")/../bin/linux_${ARCH}/aegisctl"
-        "/home/aegis/aegis-community/bin/linux_${ARCH}/aegisctl"
-        "/home/aegis/aegis-community/aegisctl"
-    )
-    for candidate_ctl in "${search_ctl[@]}"; do
-        if [[ -f "$candidate_ctl" ]]; then
-            install -m 755 "$candidate_ctl" "$ctl_dest" 2>/dev/null || cp -f "$candidate_ctl" "$ctl_dest"
-            break
-        fi
-    done
-    if [[ ! -f "$ctl_dest" ]]; then
-        curl -fsSL "${release_base}/aegisctl-linux-${ARCH}" -o "$ctl_dest" 2>/dev/null || true
-    fi
-
-    # Fallback: compile aegisctl from source if Go is available
-    if [[ ! -f "$ctl_dest" ]] && command -v go >/dev/null 2>&1; then
-        local src_dir="."
-        if [[ -d "$(dirname "$0")/cmd/aegisctl" ]]; then
-            src_dir="$(dirname "$0")"
-        fi
-        if [[ -d "${src_dir}/cmd/aegisctl" ]]; then
-            log_info "Building aegisctl binary from source..."
-            (cd "$src_dir" && go build -ldflags="-s -w" -o "$ctl_dest" ./cmd/aegisctl) 2>/dev/null || true
-        fi
-    fi
-
-    chmod +x "$bin_dest" "$updater_dest" "$ctl_dest" 2>/dev/null || true
-    ln -sf "${INSTALL_DIR}/current/aegis" "$symlink_server" 2>/dev/null || true
-    ln -sf "$updater_dest" "$symlink_updater" 2>/dev/null || true
-    ln -sf "$ctl_dest" "$symlink_ctl" 2>/dev/null || true
-
+    install -m 755 "${native_release_dir}/aegis-updater" "${updater_dest}.new"
+    mv -f "${updater_dest}.new" "$updater_dest"
+    ln -s "$native_release_dir" "${INSTALL_DIR}/current.new.$$"
+    mv -Tf "${INSTALL_DIR}/current.new.$$" "${INSTALL_DIR}/current"
+    ln -sfn "${INSTALL_DIR}/current/aegis" "$symlink_server"
+    ln -sfn "$updater_dest" "$symlink_updater"
+    ln -sfn "${INSTALL_DIR}/current/aegisctl" "$symlink_ctl"
     # Grant low port binding capability (80, 443) to aegis
     if command -v setcap >/dev/null 2>&1; then
         setcap 'cap_net_bind_service=+ep' "$bin_dest" 2>/dev/null || true
@@ -1124,11 +1150,18 @@ server:
   admin:
     host: "${ADMIN_HOST}"
     port: ${ADMIN_PORT}
+    username: "${ADMIN_USER}"
     setup_completed: true
     secure_cookies: ${admin_secure_cookies}
 
 updater:
   socket_path: /run/aegis/updater.sock
+  mode: native
+  state_path: /var/lib/aegis-updater/updater-state.json
+  releases_root: ${INSTALL_DIR}/releases
+  current_link: ${INSTALL_DIR}/current
+  service_name: aegis.service
+  health_url: http://127.0.0.1:${PROXY_PORT}/health
 
 storage:
   control:
@@ -1199,6 +1232,17 @@ sections:
 CONFIG_EOF
 
     # Setup Systemd Services (both aegis-server and aegis-updater)
+    cat > /etc/aegis/updater.yaml << UPDATER_CONFIG
+updater:
+  socket_path: /run/aegis/updater.sock
+  mode: native
+  state_path: /var/lib/aegis-updater/updater-state.json
+  releases_root: ${INSTALL_DIR}/releases
+  current_link: ${INSTALL_DIR}/current
+  service_name: aegis.service
+  health_url: http://127.0.0.1:${PROXY_PORT}/health
+UPDATER_CONFIG
+    chmod 600 /etc/aegis/updater.yaml
     if command -v systemctl >/dev/null 2>&1; then
         cat << SYSTEMD_EOF > /etc/systemd/system/aegis.service
 [Unit]
@@ -1225,8 +1269,6 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
-RuntimeDirectory=aegis
-RuntimeDirectoryMode=0775
 
 [Install]
 WantedBy=multi-user.target
@@ -1241,13 +1283,13 @@ After=network.target
 [Service]
 Type=simple
 User=root
-Group=root
+Group=aegis
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${INSTALL_DIR}/aegis-updater serve --config /etc/aegis/config.yaml
+ExecStart=${INSTALL_DIR}/current/aegis-updater serve --config /etc/aegis/updater.yaml
 Restart=on-failure
 RestartSec=5s
 RuntimeDirectory=aegis
-RuntimeDirectoryMode=0775
+RuntimeDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target
@@ -1261,10 +1303,10 @@ UPDATER_EOF
 
         log_info "Waiting for Aegis service to initialize..."
         local attempts=0
-        local max_attempts=15
+        local max_attempts=30
         local started=false
         while [[ $attempts -lt $max_attempts ]]; do
-            if systemctl is-active --quiet aegis; then
+            if systemctl is-active --quiet aegis aegis-updater && curl --fail --silent "http://127.0.0.1:${PROXY_PORT}/health/ready" >/dev/null; then
                 started=true
                 break
             fi
@@ -1275,7 +1317,7 @@ UPDATER_EOF
         if $started; then
             log_success "Systemd services (aegis & aegis-updater) created, started, and verified active."
         else
-            log_warn "Aegis service did not start immediately. Check status with: systemctl status aegis"
+            fatal "Aegis services did not become ready. Check systemctl status aegis aegis-updater and journalctl -u aegis."
         fi
     fi
 }
@@ -1487,7 +1529,9 @@ main() {
     parse_args "$@"
     log_banner
     check_root
+    [[ ! -e "${INSTALL_DIR}/current" && ! -L "${INSTALL_DIR}/current" && ! -f /etc/aegis/config.yaml && ! -f "${INSTALL_DIR}/config.yaml" && ! -f "${INSTALL_DIR}/docker-compose.yml" ]] || fatal "An Aegis installation already exists. Use its updater for version or edition changes; the bootstrap installer will not replace its configuration."
     detect_environment
+    resolve_community_version
     resolve_deploy_method
     resolve_install_mode
     resolve_direct_databases

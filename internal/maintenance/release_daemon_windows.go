@@ -6,19 +6,35 @@ import (
 	"context"
 	"errors"
 	"github.com/Microsoft/go-winio"
-	"golang.org/x/sys/windows"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 func (d *ReleaseDaemon) Serve(ctx context.Context) error {
-	if err := d.recoverInterrupted(ctx); err != nil {
+	if err := validateUpdaterConfig(d.Config); err != nil {
 		return err
 	}
-	if err := validateUpdaterConfig(d.Config); err != nil {
+	if err := os.MkdirAll(filepath.Dir(d.Config.StatePath), 0700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(d.Config.StatePath+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	var overlapped windows.Overlapped
+	if err := windows.LockFileEx(windows.Handle(lock.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped); err != nil {
+		return errors.New("another updater owns this state directory")
+	}
+	defer windows.UnlockFileEx(windows.Handle(lock.Fd()), 0, 1, 0, &overlapped)
+	defer d.stopJobs()
+	if err := d.recoverInterrupted(ctx); err != nil {
 		return err
 	}
 	listener, err := winio.ListenPipe(d.Config.SocketPath, &winio.PipeConfig{
@@ -46,7 +62,15 @@ func dialUpdater(ctx context.Context, pipe string) (net.Conn, error) {
 	return winio.DialPipeContext(ctx, pipe)
 }
 func secureRelease(root string) error { return nil }
+
+// Atomic journal replacement uses MOVEFILE_WRITE_THROUGH on Windows.
+func syncReleaseDirectory(string) error { return nil }
 func restartService(ctx context.Context, name string) error {
+	if strings.HasPrefix(name, "task:") {
+		command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; $task=Get-ScheduledTask -TaskName $env:AEGIS_UPDATER_TASK_NAME; Stop-ScheduledTask -InputObject $task; $deadline=(Get-Date).AddSeconds(60); while ((Get-ScheduledTask -TaskName $env:AEGIS_UPDATER_TASK_NAME).State -eq 'Running') { if ((Get-Date) -gt $deadline) { throw 'Aegis task did not stop' }; Start-Sleep -Milliseconds 250 }; Start-ScheduledTask -InputObject $task`)
+		command.Env = append(os.Environ(), "AEGIS_UPDATER_TASK_NAME="+strings.TrimPrefix(name, "task:"))
+		return command.Run()
+	}
 	_ = fixedCommand(ctx, "sc.exe", "stop", name)
 	for attempt := 0; attempt < 60; attempt++ {
 		out, err := commandOutput(ctx, "sc.exe", "query", name)
@@ -73,13 +97,25 @@ func atomicSymlink(target, link string) error {
 	if err := os.Symlink(target, temporary); err != nil {
 		return err
 	}
-	source, err := windows.UTF16PtrFromString(temporary)
-	if err != nil {
+	// Windows cannot replace an existing directory link with MoveFileEx. Keep
+	// the old link until its replacement exists, and restore it on rename failure.
+	backup := link + ".previous-link"
+	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	destination, err := windows.UTF16PtrFromString(link)
-	if err != nil {
+	if _, err := os.Lstat(link); err == nil {
+		if err = os.Rename(link, backup); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return windows.MoveFileEx(source, destination, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	if err := os.Rename(temporary, link); err != nil {
+		if _, statErr := os.Lstat(backup); statErr == nil {
+			_ = os.Rename(backup, link)
+		}
+		return err
+	}
+	_ = os.Remove(backup)
+	return nil
 }

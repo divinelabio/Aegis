@@ -401,7 +401,8 @@ export const api = {
                         }
                         return { success: false, error: 'Session cookie was rejected by your browser.' };
                     }
-                } catch {
+                }
+                catch {
                     // ignore network error
                 }
                 return { success: true };

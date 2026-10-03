@@ -13,8 +13,10 @@ import (
 
 const (
 	privateKeyProtectionDPAPI           = "dpapi"
+	privateKeyProtectionDPAPIMachine    = "dpapi_machine"
 	privateKeyProtectionFilePermissions = "file_permissions"
 	cryptProtectUIForbidden             = 0x1
+	cryptProtectLocalMachine            = 0x4
 )
 
 type dataBlob struct {
@@ -30,8 +32,8 @@ var (
 	localFree          = kernel32.NewProc("LocalFree")
 )
 
-// protectInstallationPrivateKey uses a current-user DPAPI scope. Reading the
-// state file alone is therefore insufficient to sign licence lease requests.
+// Machine DPAPI permits the service and administrator CLI to share the identity.
+// securePrivatePath restricts ciphertext access to the service owner and admins.
 func protectInstallationPrivateKey(privateKey ed25519.PrivateKey) (string, string, error) {
 	if len(privateKey) != ed25519.PrivateKeySize {
 		return "", "", fmt.Errorf("invalid installation private key")
@@ -40,7 +42,7 @@ func protectInstallationPrivateKey(privateKey ed25519.PrivateKey) (string, strin
 	if err != nil {
 		return "", "", err
 	}
-	return base64.RawStdEncoding.EncodeToString(protected), privateKeyProtectionDPAPI, nil
+	return base64.RawStdEncoding.EncodeToString(protected), privateKeyProtectionDPAPIMachine, nil
 }
 
 func unprotectInstallationPrivateKey(encoded, protection string) (ed25519.PrivateKey, bool, error) {
@@ -51,7 +53,7 @@ func unprotectInstallationPrivateKey(encoded, protection string) (ed25519.Privat
 		}
 		return ed25519.PrivateKey(privateKey), true, nil
 	}
-	if protection != privateKeyProtectionDPAPI {
+	if protection != privateKeyProtectionDPAPI && protection != privateKeyProtectionDPAPIMachine {
 		return nil, false, fmt.Errorf("unsupported installation private key protection %q", protection)
 	}
 	protected, err := base64.RawStdEncoding.DecodeString(encoded)
@@ -65,7 +67,7 @@ func unprotectInstallationPrivateKey(encoded, protection string) (ed25519.Privat
 	if len(privateKey) != ed25519.PrivateKeySize {
 		return nil, false, fmt.Errorf("invalid unprotected installation private key")
 	}
-	return ed25519.PrivateKey(privateKey), false, nil
+	return ed25519.PrivateKey(privateKey), protection == privateKeyProtectionDPAPI, nil
 }
 
 func cryptProtect(value []byte) ([]byte, error) {
@@ -77,7 +79,7 @@ func cryptProtect(value []byte) ([]byte, error) {
 		0,
 		0,
 		0,
-		cryptProtectUIForbidden,
+		cryptProtectUIForbidden|cryptProtectLocalMachine,
 		uintptr(unsafe.Pointer(&output)),
 	)
 	if result == 0 {
