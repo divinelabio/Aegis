@@ -132,7 +132,21 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 
 func (c *apiClient) activate(ctx context.Context, request activationRequest) (apiResponse, error) {
 	var response apiResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/activations", request, &response); err != nil {
+	err := c.doJSON(ctx, http.MethodPost, "/v1/activations", request, &response)
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusBadRequest && apiErr.Code == "invalid_request" {
+			// Older licensing authority daemons enforce DisallowUnknownFields and reject
+			// runtime_id, artifact_format, or updater_version. Retry with legacy payload.
+			legacy := request
+			legacy.RuntimeID = ""
+			legacy.ArtifactFormat = ""
+			legacy.UpdaterVersion = ""
+			var legacyResponse apiResponse
+			if legacyErr := c.doJSON(ctx, http.MethodPost, "/v1/activations", legacy, &legacyResponse); legacyErr == nil {
+				return legacyResponse, nil
+			}
+		}
 		return apiResponse{}, err
 	}
 	return response, nil
