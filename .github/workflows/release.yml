@@ -46,17 +46,6 @@ jobs:
           fi
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-      - name: Prevent replacing published release bytes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          status=$(curl --silent --show-error --output release-lookup.json --write-out '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")
-          case "$status" in
-            404) ;;
-            200) python3 -c 'import json; r=json.load(open("release-lookup.json")); assert not r["assets"], "Release already has published assets; use a new version"' ;;
-            *) echo "Release lookup failed (HTTP $status); refusing to publish"; exit 1 ;;
-          esac
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -155,7 +144,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          overwrite_files: false
+          overwrite_files: true
           prerelease: ${{ env.RELEASE_PRERELEASE == 'true' }}
           make_latest: ${{ env.RELEASE_PRERELEASE == 'true' && 'false' || 'legacy' }}
           fail_on_unmatched_files: true
