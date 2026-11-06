@@ -56,12 +56,14 @@ type clickHousePreflightResponse struct {
 
 type clickHouseAnalyticsPendingRequest struct {
 	Mode              storage.AnalyticsMode `json:"mode"`
+	Driver            storage.DBDriver      `json:"driver"`
 	Host              string                `json:"host"`
 	Port              int                   `json:"port"`
 	Database          string                `json:"database"`
 	Username          string                `json:"username"`
 	PasswordSecretRef string                `json:"password_secret_ref"`
 	Secure            bool                  `json:"secure"`
+	RetentionDays     int                   `json:"retention_days"`
 }
 
 type clickHouseAnalyticsPendingResponse struct {
@@ -76,6 +78,7 @@ type storageRuntimeStatus struct {
 	Active                bool   `json:"active"`
 	Available             bool   `json:"available"`
 	Mode                  string `json:"mode,omitempty"`
+	RetentionDays         int    `json:"retention_days,omitempty"`
 	RestartRequired       bool   `json:"restart_required"`
 	AnalyticsCapabilities string `json:"analytics_capabilities,omitempty"`
 }
@@ -270,16 +273,35 @@ func (h *Handler) HandleStorageAnalyticsClickHousePending(w http.ResponseWriter,
 		writePostgreSQLPreflightError(w, http.StatusBadRequest, "INVALID_CLICKHOUSE_ANALYTICS_CONFIGURATION")
 		return
 	}
+	driver := request.Driver
+	if driver == "" {
+		if request.Host != "" && (request.Port == 9000 || request.Username == "default" || request.PasswordSecretRef != "") {
+			driver = storage.DriverClickHouse
+		} else {
+			driver = storage.DriverPostgreSQL
+		}
+	}
+	retentionDays := request.RetentionDays
+	if retentionDays == 0 {
+		retentionDays = storage.DefaultAnalyticsRetentionDays
+	}
 	next := storage.AnalyticsConfig{
-		Mode: request.Mode, Driver: storage.DriverClickHouse, Host: request.Host,
+		Mode: request.Mode, Driver: driver, Host: request.Host,
 		Port: request.Port, Database: request.Database, Username: request.Username,
 		PasswordSecretRef: request.PasswordSecretRef, Secure: request.Secure,
+		RetentionDays: retentionDays,
 	}
 	if err := config.UpdateStorageAnalyticsConfig(next); err != nil {
 		writePostgreSQLPreflightError(w, http.StatusBadRequest, "INVALID_CLICKHOUSE_ANALYTICS_CONFIGURATION")
 		return
 	}
-	_ = json.NewEncoder(w).Encode(clickHouseAnalyticsPendingResponse{Status: "pending", RestartRequired: true})
+	activated, initErr := storage.InitAnalytics(next)
+	restartRequired := !activated || initErr != nil || !storage.AnalyticsConfigIsActive(next)
+	status := "pending"
+	if !restartRequired {
+		status = "active"
+	}
+	_ = json.NewEncoder(w).Encode(clickHouseAnalyticsPendingResponse{Status: status, RestartRequired: restartRequired})
 }
 
 // HandleStorageStatus returns an operator-safe view of the active storage

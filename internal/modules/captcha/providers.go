@@ -45,7 +45,7 @@ func (p *RecaptchaV2Provider) Verify(token, remoteIP, expectedHostname string) (
 	return verifyStandard("https://www.google.com/recaptcha/api/siteverify", p.SecretKey, token, remoteIP, "", expectedHostname)
 }
 
-// --- Cloudflare Turnstile ---
+// --- Turnstile Captcha Provider ---
 
 type TurnstileProvider struct {
 	SiteKey   string

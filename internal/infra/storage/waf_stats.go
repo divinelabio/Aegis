@@ -232,7 +232,7 @@ func windowStart(window string) (time.Time, error) {
 		return time.Now().UTC().Add(-24 * time.Hour), nil
 	case "7d":
 		return time.Now().UTC().Add(-7 * 24 * time.Hour), nil
-	case "30d":
+	case "30d", "all":
 		return time.Now().UTC().Add(-30 * 24 * time.Hour), nil
 	default:
 		d, err := time.ParseDuration(w)

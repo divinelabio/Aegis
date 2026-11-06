@@ -1,0 +1,142 @@
+// AEGIS BRAND THEME: MULTI-LAYER DEEP ORANGE DESIGN TOKENS
+
+$orange-10: #fff2e8;
+$orange-20: #ffd2b2;
+$orange-30: #ffb885;
+$orange-40: #ff9d57;
+$orange-50: #ff832b; $orange-60: #eb6200; // Core vibrant real orange
+$orange-70: #ba4e00; // Deep burnt orange (active / pressed states only)
+$orange-80: #8a3800; // Deep mahogany shadow
+$orange-90: #5c2400; // Dark shadow orange
+
+:root {
+  // Semantic Multi-Layer Depth Tokens
+  --aegis-orange-wash: rgba(235, 98, 0, 0.06);
+  --aegis-orange-tint: rgba(235, 98, 0, 0.14);
+  --aegis-orange-glow: rgba(235, 98, 0, 0.32);
+  --aegis-orange-shadow: rgba(186, 78, 0, 0.50);
+
+  --aegis-orange-light: #{$orange-40};
+  --aegis-orange-mid: #{$orange-50};
+  --aegis-orange-vibrant: #{$orange-60};
+  --aegis-orange-deep: #{$orange-70};
+  --aegis-orange-dark: #{$orange-80};
+}
+
+// DARK THEMES (Default Enterprise SOC Mode: g100 & g90)
+:root,
+[data-theme="dark"],
+html[data-theme="dark"],
+[data-carbon-theme="g100"],
+.cds--g100,
+[data-carbon-theme="g90"],
+.cds--g90 {
+  // Real vibrant orange interactive accent
+  --cds-interactive-01: #{$orange-60};
+  --cds-interactive: #{$orange-60};
+
+  // Primary Button: Real vibrant orange (#eb6200) with crisp white text
+  --cds-button-primary: #{$orange-60};
+  --cds-button-primary-hover: #{$orange-50};
+  --cds-button-primary-active: #{$orange-70};
+
+  --cds-button-tertiary: #{$orange-50};
+  --cds-button-tertiary-hover: #{$orange-40};
+  --cds-button-tertiary-active: #{$orange-60};
+
+  // High-contrast interactive borders & focus indicators
+  --cds-border-interactive: #{$orange-50};
+  --cds-focus: #{$orange-50};
+  --cds-focus-inverse: #{$orange-50};
+  --cds-icon-interactive: #{$orange-50};
+
+  // Links: Tinted warm orange for AAA contrast (8.5:1+) against #161616
+  --cds-link-primary: #{$orange-40};
+  --cds-link-primary-hover: #{$orange-30};
+  --cds-link-secondary: #{$orange-30};
+  --cds-link-inverse: #{$orange-60};
+
+  --cds-tag-background-orange: #ba4e00;
+  --cds-tag-color-orange: #fff2e8;
+
+  // Subtle selection / highlight layer
+  --cds-highlight: rgba(235, 98, 0, 0.22);
+  --cds-background-brand: #{$orange-60};
+}
+
+// LIGHT / WHITE THEMES (White & g10)
+[data-carbon-theme="g10"],
+.cds--g10,
+[data-carbon-theme="white"],
+.cds--white,
+[data-theme="light"],
+html[data-theme="light"],
+body[data-theme="light"],
+html:not([data-theme="dark"]) {
+  // Real vibrant orange interactive accent
+  --cds-interactive-01: #{$orange-60};
+  --cds-interactive-01-hover: #{$orange-50};
+  --cds-interactive-01-active: #{$orange-70};
+  --cds-interactive: #{$orange-60};
+
+  // Primary Button: Pure vibrant real orange (#eb6200) with white text
+  --cds-button-primary: #{$orange-60};
+  --cds-button-primary-hover: #{$orange-50};
+  --cds-button-primary-active: #{$orange-70};
+
+  --cds-button-tertiary: #{$orange-60};
+  --cds-button-tertiary-hover: #{$orange-50};
+  --cds-button-tertiary-active: #{$orange-70};
+
+  --cds-border-interactive: #{$orange-60};
+  --cds-link-primary: #{$orange-60};
+  --cds-link-primary-hover: #{$orange-70};
+  --cds-link-secondary: #{$orange-60};
+  --cds-link-inverse: #{$orange-50};
+
+  --cds-tag-background-orange: #fff2e8;
+  --cds-tag-color-orange: #ba4e00;
+  --cds-tag-border-orange: #ffb885;
+
+  --cds-focus: #{$orange-60};
+  --cds-focus-inverse: #ffffff;
+  --cds-icon-interactive: #{$orange-60};
+
+  --cds-highlight: rgba(235, 98, 0, 0.16);
+  --cds-background-brand: #{$orange-60};
+}
+
+// Component Refinements for Layered Depth
+
+// Active SideNav Accent Line: Layered real orange with luminous edge
+.cds--side-nav__item--active .cds--side-nav__link::before,
+.cds--side-nav__menu-item--active .cds--side-nav__link::before,
+.cds--side-nav__link[aria-current="page"]::before,
+.cds--side-nav__link--current::before {
+  background-color: var(--cds-interactive-01, #{$orange-60}) !important;
+  box-shadow: 0 0 10px rgba(235, 98, 0, 0.45);
+}
+
+// Primary Button: Ensure prominent real orange elevation
+.cds--btn--primary {
+  font-weight: 600 !important;
+  letter-spacing: 0.16px !important;
+  transition: background-color 0.14s ease, box-shadow 0.14s ease !important;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(235, 98, 0, 0.35) !important;
+  }
+}
+
+// DataTable Batch Actions Banner
+.cds--batch-actions {
+  background-color: var(--cds-button-primary, #{$orange-60}) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.cds--tag--orange {
+  background-color: var(--cds-tag-background-orange, #ba4e00) !important;
+  color: var(--cds-tag-color-orange, #fff2e8) !important;
+  border: none !important;
+  font-weight: 600 !important;
+}

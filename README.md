@@ -111,7 +111,7 @@ sudo bash install.sh
 
 ### Option 2: Docker Compose
 
-Deploy the complete Aegis stack with PostgreSQL and ClickHouse real-time analytics:
+Deploy the Aegis stack with PostgreSQL (ClickHouse is no longer mandatory; PostgreSQL powers both control-plane and analytics):
 
 ```yaml
 version: '3.8'
@@ -128,12 +128,8 @@ services:
       AEGIS_ADMIN_PASSWORD: ${AEGIS_ADMIN_PASSWORD:-admin}
       AEGIS_CONTROL_DB_HOST: postgres
       AEGIS_CONTROL_DB_PORT: "5432"
-      AEGIS_ANALYTICS_HOST: clickhouse
-      AEGIS_ANALYTICS_PORT: "9000"
     depends_on:
       postgres:
-        condition: service_healthy
-      clickhouse:
         condition: service_healthy
     volumes:
       - aegis_data:/var/lib/aegis/data
@@ -154,35 +150,17 @@ services:
       timeout: 3s
       retries: 5
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:25.8
-    container_name: aegis_clickhouse
-    restart: unless-stopped
-    environment:
-      CLICKHOUSE_DB: aegis
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
-    ports:
-      - "9000:9000"
-      - "8123:8123"
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-    healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
 volumes:
   aegis_data:
   postgres_data:
-  clickhouse_data:
 ```
 
 Start the stack:
 ```bash
 docker compose up -d
 ```
+
+*(Note: ClickHouse is optional for scale-out analytics and can be activated anytime with `docker compose --profile clickhouse up -d`).*
 
 ---
 

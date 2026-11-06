@@ -1,13 +1,11 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/divinelabio/aegis/internal/edition"
 	"github.com/divinelabio/aegis/internal/licensing"
@@ -60,14 +58,12 @@ func (h *Handler) HandleLicenseAction(w http.ResponseWriter, r *http.Request) {
 			h.writeLicenseManagerError(w, err)
 			return
 		}
-		InvalidateUpdateCache()
 		writeLicenseJSON(w, http.StatusOK, h.License.Snapshot())
 	case "deactivate":
 		if err := h.License.Deactivate(r.Context()); err != nil {
 			h.writeLicenseManagerError(w, err)
 			return
 		}
-		InvalidateUpdateCache()
 		writeLicenseJSON(w, http.StatusOK, h.License.Snapshot())
 	case "upgrade":
 		h.handleLicenseUpgrade(w, r)
@@ -79,7 +75,37 @@ func (h *Handler) HandleLicenseAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleLicenseUpgrade(w http.ResponseWriter, r *http.Request) {
-	h.HandleSystemUpdateApply(w, r)
+	if h.License == nil {
+		h.JSONError(w, "licence management is not available in this build", http.StatusServiceUnavailable)
+		return
+	}
+	snapshot := h.License.Snapshot()
+	upgrade := snapshot.Upgrade
+	if !upgrade.Required {
+		h.JSONError(w, "no commercial upgrade is pending for this installation", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(h.UpdaterSocket) == "" {
+		h.JSONError(w, "aegis-updater socket is not configured. For container or manual environments, update the binary or container image.", http.StatusNotImplemented)
+		return
+	}
+	resp, err := maintenance.CallUpdater(r.Context(), h.UpdaterSocket, maintenance.UpdaterRequest{
+		Operation:  "upgrade",
+		Manifest:   upgrade.Manifest,
+		Credential: upgrade.Credential,
+	})
+	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Error("Upgrade request to aegis-updater failed", zap.Error(err))
+		}
+		h.JSONError(w, "upgrade failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeLicenseJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":      true,
+		"message": "Upgrade dispatched to aegis-updater. Aegis is restarting...",
+		"status":  resp.Status,
+	})
 }
 
 func (h *Handler) handleUpdaterStatus(w http.ResponseWriter, r *http.Request) {
@@ -90,9 +116,7 @@ func (h *Handler) handleUpdaterStatus(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-	defer cancel()
-	resp, err := maintenance.CallUpdater(ctx, h.UpdaterSocket, maintenance.UpdaterRequest{
+	resp, err := maintenance.CallUpdater(r.Context(), h.UpdaterSocket, maintenance.UpdaterRequest{
 		Operation: "status",
 	})
 	if err != nil {
@@ -132,22 +156,12 @@ func (h *Handler) handleLicenseActivate(w http.ResponseWriter, r *http.Request) 
 		h.writeLicenseManagerError(w, err)
 		return
 	}
-	InvalidateUpdateCache()
 	writeLicenseJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) writeLicenseManagerError(w http.ResponseWriter, err error) {
 	if h.Logger != nil {
 		h.Logger.Error("Licence operation failed", zap.Error(err))
-	}
-	var authorityErr *licensing.APIError
-	if errors.As(err, &authorityErr) {
-		status := authorityErr.Status
-		if status < 400 || status >= 500 {
-			status = http.StatusServiceUnavailable
-		}
-		writeLicenseJSON(w, status, map[string]string{"error": authorityErr.Code, "code": authorityErr.Code})
-		return
 	}
 	h.JSONError(w, err.Error(), http.StatusBadGateway)
 }

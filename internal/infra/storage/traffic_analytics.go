@@ -354,6 +354,15 @@ func GetTrafficAnalyticsSummary(q TrafficAnalyticsQuery) (TrafficAnalyticsSummar
 	if err := row.Scan(&total, &blocked, &allowed, &challenged, &rateLimited, &errors, &summary.AvgLatencyMs, &summary.P95LatencyMs, &uniqueIPs, &uniqueCountries); err != nil {
 		return summary, err
 	}
+	if allowed == 0 && strings.TrimSpace(q.Action) == "" && strings.TrimSpace(q.Reason) == "" && strings.TrimSpace(q.RuleType) == "" && strings.TrimSpace(q.RuleID) == "" {
+		if since, errSince := windowStart(defaultWindow(q.Window)); errSince == nil {
+			var baselineAllowed uint64
+			if err := DB.QueryRow(`SELECT count() FROM section_events WHERE section = 'traffic' AND action = 'allow' AND timestamp >= ?`, since).Scan(&baselineAllowed); err == nil && baselineAllowed > 0 {
+				allowed = baselineAllowed
+				total += baselineAllowed
+			}
+		}
+	}
 	summary.TotalRequests = int64(total)
 	summary.BlockedRequests = int64(blocked)
 	summary.AllowedRequests = int64(allowed)

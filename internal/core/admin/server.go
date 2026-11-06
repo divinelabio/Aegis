@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/alexedwards/scs/v2"
 	"github.com/divinelabio/aegis/internal/analytics"
 	"github.com/divinelabio/aegis/internal/app"
 	"github.com/divinelabio/aegis/internal/core/admin/audit"
@@ -25,19 +27,17 @@ import (
 	"github.com/divinelabio/aegis/internal/infra/health"
 	"github.com/divinelabio/aegis/internal/infra/mail"
 	"github.com/divinelabio/aegis/internal/infra/metrics"
-	"github.com/divinelabio/aegis/internal/infra/telemetry"
 	"github.com/divinelabio/aegis/internal/infra/transport"
 	"github.com/divinelabio/aegis/internal/rules"
 	"github.com/divinelabio/aegis/internal/sections"
 	adminui "github.com/divinelabio/aegis/web/admin"
-	"github.com/alexedwards/scs/v2"
 	"github.com/google/uuid"
 )
 
-// Version info (set via ldflags: -X 'github.com/.../admin.Version=1.0.1')
+// Version info (set via ldflags: -X 'github.com/.../admin.Version=1.0.0')
 var (
-	Version   = "1.0.1" // Set via ldflags
-	BuildDate = "unknown" // Set via ldflags
+	Version   string // Set via ldflags
+	BuildDate string // Set via ldflags
 )
 
 // AdminServer manages the administration interface.
@@ -276,41 +276,53 @@ func (s *AdminServer) withAuthenticatedOperator(handler http.HandlerFunc) http.H
 }
 
 func (s *AdminServer) routes() {
-	// Serve Frontend Static Files with SPA support
-	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		normalizedPath := r.URL.Path
-		if len(normalizedPath) > 1 {
-			normalizedPath = strings.TrimSuffix(normalizedPath, "/")
-		}
-
+	// Serve React Admin Console frontend with embedded fallback and SPA routing
+	serveReact := func(w http.ResponseWriter, r *http.Request) {
 		// If API path not matched by specific handlers, return 404
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
 		}
 
-		// Explicitly serve login.html for /admin/login
-		if normalizedPath == "/admin/login" {
-			if s.shouldServeFirstRunSetup(r.Context()) {
-				adminui.ServeAsset(w, r, "index.html")
-				return
-			}
-			adminui.ServeAsset(w, r, "login.html")
-			return
-		}
-		if normalizedPath == "/admin/request-reset" {
-			adminui.ServeAsset(w, r, "reset_request.html")
-			return
-		}
-		if normalizedPath == "/admin/reset-confirm" {
-			adminui.ServeAsset(w, r, "reset_confirm.html")
-			return
+		relPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if strings.HasPrefix(relPath, "admin/") {
+			relPath = strings.TrimPrefix(relPath, "admin/")
+		} else if strings.HasPrefix(relPath, "react/") {
+			relPath = strings.TrimPrefix(relPath, "react/")
 		}
 
-		// Serve requested asset from disk if present, otherwise from embedded assets
-		// (with automatic fallback to index.html for SPA routes)
-		adminui.ServeAsset(w, r, r.URL.Path)
-	})
+		if relPath == "" || relPath == "." || relPath == "admin" || relPath == "react" {
+			relPath = "index.html"
+		}
+
+		adminFS, _ := adminui.FileSystem()
+
+		// Try to serve static file from admin react filesystem
+		if f, err := adminFS.Open(relPath); err == nil {
+			defer f.Close()
+			if stat, err := f.Stat(); err == nil && !stat.IsDir() {
+				http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+				return
+			}
+		}
+
+		// SPA Fallback: Serve index.html for all SPA routes (e.g., /, /admin/*, /admin/login, /waf/*, /settings, etc.)
+		indexFile, err := adminFS.Open("index.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer indexFile.Close()
+		stat, err := indexFile.Stat()
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeContent(w, r, "index.html", stat.ModTime(), indexFile)
+	}
+
+	s.mux.HandleFunc("/", serveReact)
+	s.mux.HandleFunc("/react/", serveReact)
 
 	// Serve WAF Tester
 	testerFs := http.FileServer(http.Dir("./web/tester"))
@@ -427,6 +439,7 @@ func (s *AdminServer) routes() {
 	// an analytics dependency and cannot alter PostgreSQL control state.
 	s.mux.Handle("/api/storage/analytics/clickhouse/preflight", wrapPermCSRF("system:config", s.handlers.HandleStorageAnalyticsClickHousePreflight))
 	s.mux.Handle("/api/storage/analytics/clickhouse/pending", auditConfig("storage.analytics.pending", wrapPermCSRF("system:config", s.handlers.HandleStorageAnalyticsClickHousePending)))
+	s.mux.Handle("/api/storage/analytics/pending", auditConfig("storage.analytics.pending", wrapPermCSRF("system:config", s.handlers.HandleStorageAnalyticsClickHousePending)))
 	// Rules API moved to WAF section (waf/api_editor.go)
 
 	// Alerts
@@ -435,8 +448,8 @@ func (s *AdminServer) routes() {
 
 	// Module Configs
 	s.mux.Handle("/api/modules/captcha/config", auditConfig("modules.captcha", wrapPermCSRF("waf:write", s.handlers.HandleCaptchaConfig)))
-	s.mux.Handle("/api/modules/challenge/config", auditConfig("modules.challenge", wrapPerm("waf:write", s.handlers.HandleChallengeConfig)))
-	s.mux.Handle("/api/modules/reputation/config", auditConfig("modules.reputation", wrapPerm("waf:write", s.handlers.HandleReputationConfig)))
+	s.mux.Handle("/api/modules/challenge/config", auditConfig("modules.challenge", wrapPermCSRF("waf:write", s.handlers.HandleChallengeConfig)))
+	s.mux.Handle("/api/modules/reputation/config", auditConfig("modules.reputation", wrapPermCSRF("waf:write", s.handlers.HandleReputationConfig)))
 
 	// Enterprise Rule Editor routes moved to WAF section
 
@@ -658,7 +671,7 @@ func (s *AdminServer) Start() error {
 	// Wrap mux with global middleware (Security Headers AND Session LoadAndSave)
 	// IMPORTANT: LoadAndSave must be outer-most to ensure context is populated
 	adminHandler := s.sessions.LoadAndSave(middleware.SecurityHeaders(s.mux))
-	handler := telemetry.Middleware(s.prometheusExporter(adminHandler))
+	handler := s.prometheusExporter(adminHandler)
 	handler = http.MaxBytesHandler(handler, 1<<20)
 	if s.identityMW != nil {
 		handler = s.identityMW(handler)

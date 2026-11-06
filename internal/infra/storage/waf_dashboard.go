@@ -365,6 +365,63 @@ func getWAFDashboardTimeseriesContext(ctx context.Context, q WAFAnalyticsQuery) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	var step time.Duration
+	switch interval {
+	case "1m":
+		step = time.Minute
+	case "5m":
+		step = 5 * time.Minute
+	case "1h":
+		step = time.Hour
+	case "1d":
+		step = 24 * time.Hour
+	default:
+		step = time.Hour
+	}
+
+	since, errSince := windowStart(defaultWindow(q.Window))
+	if errSince == nil {
+		if value := strings.TrimSpace(q.Since); value != "" {
+			if parsed, parseErr := time.Parse(time.RFC3339, value); parseErr == nil {
+				since = parsed.UTC()
+			}
+		}
+		until := time.Now().UTC()
+		if value := strings.TrimSpace(q.Until); value != "" {
+			if parsed, parseErr := time.Parse(time.RFC3339, value); parseErr == nil {
+				until = parsed.UTC()
+			}
+		}
+
+		startBucket := since.Truncate(step)
+		endBucket := until.Truncate(step)
+		out := make([]WAFTimeseriesPoint, 0)
+		for t := startBucket; !t.After(endBucket); t = t.Add(step) {
+			key := t.Unix()
+			if pt, ok := byBucket[key]; ok {
+				out = append(out, *pt)
+				delete(byBucket, key)
+			} else {
+				out = append(out, WAFTimeseriesPoint{
+					Timestamp: key,
+					Counts: map[string]int64{
+						"total":  0,
+						"block":  0,
+						"detect": 0,
+						"allow":  0,
+					},
+				})
+			}
+		}
+		if len(byBucket) > 0 {
+			for _, pt := range byBucket {
+				out = append(out, *pt)
+			}
+			sort.Slice(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
+		}
+		return out, nil
+	}
+
 	keys := make([]int64, 0, len(byBucket))
 	for key := range byBucket {
 		keys = append(keys, key)

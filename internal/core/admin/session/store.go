@@ -19,7 +19,7 @@ func NewManager(secure bool) *scs.SessionManager {
 	sessionManager.Lifetime = 24 * time.Hour
 	sessionManager.Cookie.Name = "aegis_session"
 	sessionManager.Cookie.HttpOnly = true
-	sessionManager.Cookie.SameSite = http.SameSiteLaxMode
+	sessionManager.Cookie.SameSite = http.SameSiteStrictMode
 	sessionManager.Cookie.Secure = secure // Ensure TLS (or localhost)
 
 	// Persist sessions in Redis if configured. REDIS_URL is preferred for

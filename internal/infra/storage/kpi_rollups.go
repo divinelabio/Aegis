@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -228,3 +229,194 @@ func (s *KPIRollupStore) QuerySecurityKPIs(ctx context.Context, from, to time.Ti
 	}
 	return results, nil
 }
+
+// AggregateSecurityRollups aggregates security events from section_events (WHERE section != 'traffic')
+// grouped by bucket_hour, section, action into kpi_security_rollups_1h using ON CONFLICT DO UPDATE.
+func (s *KPIRollupStore) AggregateSecurityRollups(ctx context.Context, since time.Time) error {
+	if s.pool == nil {
+		return fmt.Errorf("control db pool is unavailable")
+	}
+
+	var query string
+	var args []interface{}
+	if !since.IsZero() {
+		since = since.Truncate(time.Hour)
+		query = `
+		INSERT INTO kpi_security_rollups_1h (
+			bucket_hour, section_id, action, total_events,
+			blocked_requests, challenged_requests, flagged_requests
+		)
+		SELECT 
+			date_trunc('hour', timestamp) AS bucket_hour,
+			section AS section_id,
+			action,
+			COUNT(*) AS total_events,
+			COUNT(*) FILTER (WHERE action IN ('block', 'drop')) AS blocked_requests,
+			COUNT(*) FILTER (WHERE action = 'challenge') AS challenged_requests,
+			COUNT(*) FILTER (WHERE action IN ('detect', 'flag', 'observe', 'log')) AS flagged_requests
+		FROM section_events
+		WHERE section != 'traffic' AND timestamp >= $1
+		GROUP BY date_trunc('hour', timestamp), section, action
+		ON CONFLICT (bucket_hour, section_id, action) DO UPDATE SET
+			total_events = EXCLUDED.total_events,
+			blocked_requests = EXCLUDED.blocked_requests,
+			challenged_requests = EXCLUDED.challenged_requests,
+			flagged_requests = EXCLUDED.flagged_requests;
+		`
+		args = []interface{}{since}
+	} else {
+		query = `
+		INSERT INTO kpi_security_rollups_1h (
+			bucket_hour, section_id, action, total_events,
+			blocked_requests, challenged_requests, flagged_requests
+		)
+		SELECT 
+			date_trunc('hour', timestamp) AS bucket_hour,
+			section AS section_id,
+			action,
+			COUNT(*) AS total_events,
+			COUNT(*) FILTER (WHERE action IN ('block', 'drop')) AS blocked_requests,
+			COUNT(*) FILTER (WHERE action = 'challenge') AS challenged_requests,
+			COUNT(*) FILTER (WHERE action IN ('detect', 'flag', 'observe', 'log')) AS flagged_requests
+		FROM section_events
+		WHERE section != 'traffic'
+		GROUP BY date_trunc('hour', timestamp), section, action
+		ON CONFLICT (bucket_hour, section_id, action) DO UPDATE SET
+			total_events = EXCLUDED.total_events,
+			blocked_requests = EXCLUDED.blocked_requests,
+			challenged_requests = EXCLUDED.challenged_requests,
+			flagged_requests = EXCLUDED.flagged_requests;
+		`
+	}
+
+	_, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("aggregate security rollups: %w", err)
+	}
+	return nil
+}
+
+// AggregateTrafficRollups aggregates traffic events from section_events (WHERE section = 'traffic')
+// grouped by bucket_minute into kpi_traffic_rollups_1m using ON CONFLICT DO UPDATE.
+func (s *KPIRollupStore) AggregateTrafficRollups(ctx context.Context, since time.Time) error {
+	if s.pool == nil {
+		return fmt.Errorf("control db pool is unavailable")
+	}
+
+	var query string
+	var args []interface{}
+	if !since.IsZero() {
+		since = since.Truncate(time.Minute)
+		query = `
+		INSERT INTO kpi_traffic_rollups_1m (
+			bucket_minute, route_id, total_requests, bytes_in, bytes_out,
+			status_2xx, status_4xx, status_5xx,
+			latency_p50_ms, latency_p95_ms, latency_p99_ms
+		)
+		SELECT 
+			date_trunc('minute', timestamp) AS bucket_minute,
+			'global' AS route_id,
+			COUNT(*) AS total_requests,
+			0::bigint AS bytes_in,
+			COALESCE(SUM(CASE WHEN metadata LIKE '{%}' AND (metadata::jsonb ? 'bytes_sent') AND (metadata::jsonb->>'bytes_sent') ~ '^[0-9]+$' THEN (metadata::jsonb->>'bytes_sent')::bigint ELSE 0 END), 0)::bigint AS bytes_out,
+			COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS status_2xx,
+			COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS status_4xx,
+			COUNT(*) FILTER (WHERE status_code >= 500 AND status_code < 600) AS status_5xx,
+			COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_ms)::int, 0) AS latency_p50_ms,
+			COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::int, 0) AS latency_p95_ms,
+			COALESCE(percentile_cont(0.99) WITHIN GROUP (ORDER BY latency_ms)::int, 0) AS latency_p99_ms
+		FROM section_events
+		WHERE timestamp >= $1
+		GROUP BY date_trunc('minute', timestamp)
+		ON CONFLICT (bucket_minute, route_id) DO UPDATE SET
+			total_requests = EXCLUDED.total_requests,
+			bytes_in = EXCLUDED.bytes_in,
+			bytes_out = EXCLUDED.bytes_out,
+			status_2xx = EXCLUDED.status_2xx,
+			status_4xx = EXCLUDED.status_4xx,
+			status_5xx = EXCLUDED.status_5xx,
+			latency_p50_ms = EXCLUDED.latency_p50_ms,
+			latency_p95_ms = EXCLUDED.latency_p95_ms,
+			latency_p99_ms = EXCLUDED.latency_p99_ms;
+		`
+		args = []interface{}{since}
+	} else {
+		query = `
+		INSERT INTO kpi_traffic_rollups_1m (
+			bucket_minute, route_id, total_requests, bytes_in, bytes_out,
+			status_2xx, status_4xx, status_5xx,
+			latency_p50_ms, latency_p95_ms, latency_p99_ms
+		)
+		SELECT 
+			date_trunc('minute', timestamp) AS bucket_minute,
+			'global' AS route_id,
+			COUNT(*) AS total_requests,
+			0::bigint AS bytes_in,
+			COALESCE(SUM(CASE WHEN metadata LIKE '{%}' AND (metadata::jsonb ? 'bytes_sent') AND (metadata::jsonb->>'bytes_sent') ~ '^[0-9]+$' THEN (metadata::jsonb->>'bytes_sent')::bigint ELSE 0 END), 0)::bigint AS bytes_out,
+			COUNT(*) FILTER (WHERE status_code >= 200 AND status_code < 300) AS status_2xx,
+			COUNT(*) FILTER (WHERE status_code >= 400 AND status_code < 500) AS status_4xx,
+			COUNT(*) FILTER (WHERE status_code >= 500 AND status_code < 600) AS status_5xx,
+			COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_ms)::int, 0) AS latency_p50_ms,
+			COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::int, 0) AS latency_p95_ms,
+			COALESCE(percentile_cont(0.99) WITHIN GROUP (ORDER BY latency_ms)::int, 0) AS latency_p99_ms
+		FROM section_events
+		GROUP BY date_trunc('minute', timestamp)
+		ON CONFLICT (bucket_minute, route_id) DO UPDATE SET
+			total_requests = EXCLUDED.total_requests,
+			bytes_in = EXCLUDED.bytes_in,
+			bytes_out = EXCLUDED.bytes_out,
+			status_2xx = EXCLUDED.status_2xx,
+			status_4xx = EXCLUDED.status_4xx,
+			status_5xx = EXCLUDED.status_5xx,
+			latency_p50_ms = EXCLUDED.latency_p50_ms,
+			latency_p95_ms = EXCLUDED.latency_p95_ms,
+			latency_p99_ms = EXCLUDED.latency_p99_ms;
+		`
+	}
+
+	_, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("aggregate traffic rollups: %w", err)
+	}
+	return nil
+}
+
+// StartRollupWorker performs an initial backfill on startup, then runs on a background ticker
+// (e.g. every 1 minute) to keep rollups continuously updated.
+func (s *KPIRollupStore) StartRollupWorker(ctx context.Context, interval time.Duration) {
+	if s.pool == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 1 * time.Minute
+	}
+
+	// Initial backfill across all history
+	if err := s.AggregateSecurityRollups(ctx, time.Time{}); err != nil {
+		log.Printf("[kpi_rollups] initial security backfill failed: %v", err)
+	}
+	if err := s.AggregateTrafficRollups(ctx, time.Time{}); err != nil {
+		log.Printf("[kpi_rollups] initial traffic backfill failed: %v", err)
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			secSince := now.Add(-2 * time.Hour)
+			if err := s.AggregateSecurityRollups(ctx, secSince); err != nil {
+				log.Printf("[kpi_rollups] security rollup update failed: %v", err)
+			}
+
+			trafSince := now.Add(-30 * time.Minute)
+			if err := s.AggregateTrafficRollups(ctx, trafSince); err != nil {
+				log.Printf("[kpi_rollups] traffic rollup update failed: %v", err)
+			}
+		}
+	}
+}
+

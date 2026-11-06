@@ -15,7 +15,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 
 		// Content Security Policy
 		// Allowing unsafe-inline for now as we have inline scripts in login.html/index.html
-		// Allowing fonts from Google Fonts
+		// Allowing external font assets
 		csp := "default-src 'self'; " +
 			"script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
 			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; " +

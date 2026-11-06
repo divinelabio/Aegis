@@ -1,0 +1,128 @@
+
+.aegis-page-header {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--cds-border-subtle);
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s ease;
+
+  &__kicker {
+    font-family: var(--cds-font-family, 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 14px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--cds-text-helper);
+    margin-bottom: 8px;
+    user-select: none;
+  }
+
+  &__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px 24px;
+    width: 100%;
+  }
+
+  &__left {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 500px;
+  }
+
+  &__title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  &__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--cds-icon-primary);
+    flex-shrink: 0;
+
+    svg {
+      fill: currentColor;
+    }
+  }
+
+  &__title {
+    font-family: var(--cds-font-family, 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+    font-size: 32px;
+    font-weight: 300;     line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--cds-text-primary);
+    margin: 0;
+    padding: 0;
+
+    @media (max-width: 672px) {
+      font-size: 24px;
+      line-height: 1.3;
+    }
+  }
+
+  &__badge {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  // Subtitle / Description
+  &__subtitle {
+    font-family: var(--cds-font-family, 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+    font-size: 14px;
+    line-height: 1.5;
+    font-weight: 400;
+    color: var(--cds-text-secondary);
+    margin: 8px 0 0 0;
+    max-width: 840px;
+    word-break: break-word;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+    flex-shrink: 0;
+    align-self: flex-start;
+    padding-top: 2px; // Optical baseline balance with 32px title
+    margin-left: auto; // Always pinned to the far right of the header
+
+    @media (max-width: 768px) {
+      justify-content: flex-start;
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    .cds--toggle {
+      margin-bottom: 0;
+    }
+
+    .aegis-header-switcher.cds--content-switcher {
+      order: 999;
+      flex-shrink: 0;
+      width: auto;
+      min-width: 120px;
+    }
+  }
+
+  // Auxiliary bottom slot (Tabs, etc.)
+  &__bottom {
+    margin-top: 20px;
+    width: 100%;
+  }
+}

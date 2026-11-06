@@ -38,7 +38,7 @@ func (h *Handler) HandleGetProfile(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Return Safe Data
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"id":          u.ID,
 		"username":    u.Username,
 		"email":       u.Email,
@@ -46,7 +46,11 @@ func (h *Handler) HandleGetProfile(w http.ResponseWriter, r *http.Request) {
 		"mfa_enabled": u.MFAEnabled,
 		"created_at":  u.CreatedAt,
 		// Do not return password hash or MFA secret
-	})
+	}
+	if role, err := h.UserRepo.GetRoleByID(r.Context(), u.RoleID); err == nil && role != nil {
+		resp["role_name"] = role.Name
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleUpdateProfile updates the current user's credentials

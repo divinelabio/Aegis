@@ -141,7 +141,15 @@ func securityDashboardQuery(r *http.Request) (storage.WAFAnalyticsQuery, error) 
 		Until:           values.Get("until"),
 		Cursor:          values.Get("cursor"),
 		Sort:            values.Get("sort"),
+		Search:          values.Get("search"),
+		Q:               values.Get("q"),
 		Limit:           securityDashboardQueryInt(values.Get("limit"), 50),
+	}
+	if query.Q == "" {
+		query.Q = query.Search
+	}
+	if query.Search == "" {
+		query.Search = query.Q
 	}
 	query.Limit = storage.NormalizeWAFLimit(query.Limit, 50, 500)
 	if query.Window == "" {
@@ -157,6 +165,25 @@ func securityDashboardQuery(r *http.Request) (storage.WAFAnalyticsQuery, error) 
 	if values.Get("max_score") != "" {
 		value := securityDashboardQueryInt(values.Get("max_score"), 0)
 		query.MaxScore = &value
+	}
+	if query.MinScore == nil && query.MaxScore == nil {
+		switch strings.ToLower(strings.TrimSpace(values.Get("score_band"))) {
+		case "critical":
+			min := 15
+			query.MinScore = &min
+		case "high":
+			min, max := 10, 14
+			query.MinScore, query.MaxScore = &min, &max
+		case "elevated":
+			min, max := 5, 9
+			query.MinScore, query.MaxScore = &min, &max
+		case "medium":
+			min, max := 5, 9
+			query.MinScore, query.MaxScore = &min, &max
+		case "low":
+			min, max := 1, 4
+			query.MinScore, query.MaxScore = &min, &max
+		}
 	}
 	return query, nil
 }

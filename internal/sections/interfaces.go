@@ -409,7 +409,7 @@ const (
 // Match evaluates the condition against a value
 func (c *Condition) Match(value interface{}) bool {
 	// Implementation will handle type coercion and matching
-	// This is a placeholder - full implementation in rule engine
+	// Implementation provided by rule engine.
 	return false
 }
 

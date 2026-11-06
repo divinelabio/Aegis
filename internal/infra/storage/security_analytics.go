@@ -492,7 +492,7 @@ func getSecurityMetadataKeyBreakdown(q WAFAnalyticsQuery, metadataKeys ...string
 	var total int64
 	for rows.Next() {
 		var action, rawMetadata string
-		var timestamp uint32
+		var timestamp int64
 		var score int32
 		var latency int64
 		if err := rows.Scan(&action, &timestamp, &score, &latency, &rawMetadata); err != nil {
@@ -591,7 +591,7 @@ func getSecurityMetadataBreakdown(q WAFAnalyticsQuery, kind securityBreakdownKin
 	var total int64
 	for rows.Next() {
 		var section, action, ruleID, ruleName, rawMetadata string
-		var timestamp uint32
+		var timestamp int64
 		var score int32
 		var latency int64
 		if err := rows.Scan(&section, &action, &timestamp, &score, &latency, &ruleID, &ruleName, &rawMetadata); err != nil {
@@ -729,6 +729,9 @@ func GetSecurityAnalyticsEvents(q WAFAnalyticsQuery) (WAFAnalyticsEventsPage, er
 	if DB == nil {
 		return page, nil
 	}
+	if len(q.Sections) == 0 && strings.TrimSpace(q.Section) == "" {
+		q.Sections = append([]string{}, securityAnalyticsSections...)
+	}
 	limit := NormalizeWAFLimit(q.Limit, 50, 500)
 	q.Limit = limit + 1
 	where, args, err := buildWAFAnalyticsWhere(q)
@@ -813,9 +816,9 @@ func GetSecurityAnalyticsEvent(id string) (*WAFAnalyticsEvent, error) {
 
 func scanSecurityAnalyticsEvent(row sqlScanner) (WAFAnalyticsEvent, error) {
 	var event WAFAnalyticsEvent
-	var timestamp uint32
-	var status uint16
-	var score int32
+	var timestamp int64
+	var status int
+	var score int
 	var rawMetadata string
 	if err := row.Scan(&event.ID, &timestamp, &event.Section, &event.ClientIP, &event.Country, &event.Method, &event.Path, &status, &event.Action, &event.UserAgent, &event.RuleID, &event.RuleName, &score, &event.LatencyMs, &event.RequestID, &event.UserAgentFamily, &rawMetadata); err != nil {
 		return event, err
@@ -833,6 +836,7 @@ func scanSecurityAnalyticsEvent(row sqlScanner) (WAFAnalyticsEvent, error) {
 	if len(event.MatchedFields) == 0 {
 		event.MatchedFields = firstSecurityValues(event.Metadata, "reason", "reason_code", "failed_requirement")
 	}
+	populateWAFEventDerivedFields(&event)
 	return event, nil
 }
 
@@ -846,24 +850,76 @@ func getSecurityAnalyticsHealth(q WAFAnalyticsQuery) WAFAnalyticsHealth {
 	if DB == nil {
 		return health
 	}
+
+	sections := securityAnalyticsSections
+	if len(q.Sections) > 0 {
+		sections = normalizedWAFAnalyticsSections(q.Sections)
+	} else if section := strings.TrimSpace(q.Section); section != "" {
+		sections = []string{section}
+	}
+
+	placeholders := make([]string, 0, len(sections))
+	histArgs := make([]any, 0, len(sections))
+	for _, sec := range sections {
+		placeholders = append(placeholders, "?")
+		histArgs = append(histArgs, sec)
+	}
+
+	var allTimeCount uint64
+	var allTimeLast uint32
+	histQuery := `SELECT count(), toUnixTimestamp(max(timestamp)) FROM section_events WHERE section IN (` + strings.Join(placeholders, ", ") + `)`
+	if err := DB.QueryRow(histQuery, histArgs...).Scan(&allTimeCount, &allTimeLast); err != nil {
+		health.Message = "Unable to read security analytics freshness"
+		return health
+	}
+	if allTimeCount == 0 || allTimeLast == 0 {
+		health.FreshnessStatus = "empty"
+		health.Message = "No security events have been recorded yet"
+		return health
+	}
+
+	health.LastEventTimestamp = int64(allTimeLast)
+	health.IngestionLagSeconds = int64(time.Since(time.Unix(int64(allTimeLast), 0).UTC()).Seconds())
+
 	where, args, err := buildWAFAnalyticsWhere(q)
 	if err != nil {
 		health.Message = "Unable to read security analytics filters"
 		return health
 	}
-	var count uint64
-	var last uint32
-	if err := DB.QueryRow(`SELECT count(), toUnixTimestamp(max(timestamp)) FROM section_events `+where, args...).Scan(&count, &last); err != nil {
+
+	var windowCount uint64
+	var windowLast uint32
+	if err := DB.QueryRow(`SELECT count(), toUnixTimestamp(max(timestamp)) FROM section_events `+where, args...).Scan(&windowCount, &windowLast); err != nil {
 		health.Message = "Unable to read security analytics freshness"
 		return health
 	}
-	if count == 0 || last == 0 {
-		health.FreshnessStatus = "empty"
-		health.Message = "No security events have been recorded yet"
+
+	if windowCount == 0 || windowLast == 0 {
+		health.FreshnessStatus = "stale"
+		lag := time.Since(time.Unix(int64(allTimeLast), 0).UTC())
+		days := int(lag.Hours() / 24)
+		hours := int(lag.Hours())
+		if days > 1 {
+			health.Message = fmt.Sprintf("No events in selected window. Last event recorded %d days ago.", days)
+		} else if days == 1 {
+			health.Message = "No events in selected window. Last event recorded 1 day ago."
+		} else if hours > 1 {
+			health.Message = fmt.Sprintf("No events in selected window. Last event recorded %d hours ago.", hours)
+		} else if hours == 1 {
+			health.Message = "No events in selected window. Last event recorded 1 hour ago."
+		} else {
+			minutes := int(lag.Minutes())
+			if minutes <= 1 {
+				health.Message = "No events in selected window. Last event recorded moments ago."
+			} else {
+				health.Message = fmt.Sprintf("No events in selected window. Last event recorded %d minutes ago.", minutes)
+			}
+		}
 		return health
 	}
-	health.LastEventTimestamp = int64(last)
-	health.IngestionLagSeconds = int64(time.Since(time.Unix(int64(last), 0).UTC()).Seconds())
+
+	health.LastEventTimestamp = int64(windowLast)
+	health.IngestionLagSeconds = int64(time.Since(time.Unix(int64(windowLast), 0).UTC()).Seconds())
 	switch {
 	case health.IngestionLagSeconds <= 120:
 		health.FreshnessStatus = "fresh"

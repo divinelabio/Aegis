@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/divinelabio/aegis/internal/app"
-	"github.com/divinelabio/aegis/internal/buildinfo"
 	"github.com/divinelabio/aegis/internal/core/admin/handlers"
 	"github.com/divinelabio/aegis/internal/edition"
 	"github.com/divinelabio/aegis/internal/licensing"
@@ -20,8 +19,8 @@ var (
 	LicenseAPIURL        = "https://license.divinelab.io"
 	LicenseIssuer        = "https://license.divinelab.io"
 	LicenseAudience      = "aegis-runtime"
-	LicenseRootPublicKey = buildinfo.RootPublicKey
-	LicenseSignedKeySet  = buildinfo.SignedKeySet
+	LicenseRootPublicKey = ""
+	LicenseSignedKeySet  = ""
 )
 
 var communityLicenseManager licensing.Manager
@@ -94,18 +93,16 @@ func initializeCommunityLicensing(ctxRaw, cfgRaw, _, loggerRaw interface{}, vers
 	}
 
 	realManager, err := licensing.NewManager(licensing.Config{
-		StateDir:           stateDir,
-		APIURL:             apiURL,
-		Issuer:             issuer,
-		Audience:           LicenseAudience,
-		Version:            version,
-		UpdaterVersionFunc: configuredUpdaterVersion(cfgRaw),
-		ArtifactFormat:     configuredArtifactFormat(cfgRaw),
-		CompiledTier:       compiledTier,
-		CompiledFeatures:   compiledFeatures,
-		TrustedKeys:        trustedKeys,
-		RootPublicKey:      rootPubKey,
-		SignedKeySet:       signedKeySet,
+		StateDir:         stateDir,
+		APIURL:           apiURL,
+		Issuer:           issuer,
+		Audience:         LicenseAudience,
+		Version:          version,
+		CompiledTier:     compiledTier,
+		CompiledFeatures: compiledFeatures,
+		TrustedKeys:      trustedKeys,
+		RootPublicKey:    rootPubKey,
+		SignedKeySet:     signedKeySet,
 	})
 	if err != nil {
 		logger.Error("Failed to initialize licence manager", zap.Error(err))

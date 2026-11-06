@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/divinelabio/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/storage"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +26,30 @@ func (s *Section) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
+	}
+	window := r.URL.Query().Get("window")
+	if window == "" {
+		window = "24h"
+	}
+	if storage.DB != nil {
+		if dbStats, err := storage.GetWAFStats(window); err == nil && dbStats != nil {
+			attackTypes := make([]map[string]interface{}, 0, len(dbStats.CategoryDist))
+			for cat, cnt := range dbStats.CategoryDist {
+				attackTypes = append(attackTypes, map[string]interface{}{"type": cat, "count": cnt})
+			}
+			writeJSON(w, map[string]interface{}{"dashboard": map[string]interface{}{
+				"total_requests":    dbStats.TotalRequests,
+				"blocked_requests":  dbStats.BlockedRequests,
+				"allowed_requests":  dbStats.PassedRequests,
+				"detected_requests": dbStats.DetectedRequests,
+				"avg_inspection_ms": dbStats.AvgLatencyMs,
+				"attack_types":      attackTypes,
+				"history":           dbStats.History,
+				"top_rules":         dbStats.TopRules,
+				"action_dist":       dbStats.ActionDist,
+			}})
+			return
+		}
 	}
 	stats := s.Stats()
 	writeJSON(w, map[string]interface{}{"dashboard": map[string]interface{}{
@@ -39,15 +64,58 @@ func (s *Section) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	stats := s.Stats()
+	q := storage.WAFAnalyticsQuery{
+		Window:   r.URL.Query().Get("window"),
+		Interval: r.URL.Query().Get("interval"),
+		Section:  SectionID,
+		Action:   r.URL.Query().Get("action"),
+		Category: r.URL.Query().Get("category"),
+		RuleID:   r.URL.Query().Get("rule_id"),
+		IP:       r.URL.Query().Get("ip"),
+		Path:     r.URL.Query().Get("path"),
+		Method:   r.URL.Query().Get("method"),
+		Host:     r.URL.Query().Get("host"),
+		Country:  r.URL.Query().Get("country"),
+		Status:   r.URL.Query().Get("status"),
+		Severity: r.URL.Query().Get("severity"),
+		Cursor:   r.URL.Query().Get("cursor"),
+		Sort:     r.URL.Query().Get("sort"),
+	}
 	if strings.Contains(r.URL.Path, "/events/") {
+		parts := strings.Split(r.URL.Path, "/events/")
+		id := strings.Trim(parts[len(parts)-1], "/")
+		if storage.DB != nil && id != "" {
+			if event, err := storage.GetWAFAnalyticsEvent(id); err == nil && event != nil {
+				writeJSON(w, map[string]interface{}{"event": event})
+				return
+			}
+		}
 		writeJSON(w, map[string]interface{}{"event": nil, "error": "event_not_found"})
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/events") {
+		if storage.DB != nil {
+			if page, err := storage.GetWAFAnalyticsEvents(q); err == nil {
+				writeJSON(w, map[string]interface{}{"events": page.Events, "total": page.Count, "next_cursor": page.NextCursor})
+				return
+			}
+		}
 		writeJSON(w, map[string]interface{}{"events": []interface{}{}, "total": 0})
 		return
 	}
+	if storage.DB != nil {
+		if dashboard, err := storage.GetWAFAnalyticsDashboard(q); err == nil {
+			writeJSON(w, map[string]interface{}{
+				"dashboard": dashboard,
+				"summary":   dashboard.Summary,
+				"history":   dashboard.Timeseries,
+				"events":    dashboard.Events.Events,
+				"top_rules": dashboard.Breakdowns["rules"],
+			})
+			return
+		}
+	}
+	stats := s.Stats()
 	writeJSON(w, map[string]interface{}{
 		"dashboard": map[string]interface{}{"total_requests": stats.TotalRequests, "blocked_requests": stats.BlockedRequests, "allowed_requests": stats.AllowedRequests},
 		"summary":   map[string]interface{}{"total_requests": stats.TotalRequests, "blocked_requests": stats.BlockedRequests},

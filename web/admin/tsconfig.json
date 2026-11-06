@@ -1,11 +1,7 @@
 {
-  "extends": "../../config/tsconfig.admin.json",
-  "compilerOptions": {
-    "rootDir": "./src",
-    "outDir": "./dist/js"
-  },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.d.ts"
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
   ]
 }

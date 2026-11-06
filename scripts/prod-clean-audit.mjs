@@ -10,8 +10,7 @@ const ignoredDirs = new Set([
   'node_modules',
   'pgdata',
   'rules',
-  'data/rules',
-  'web/admin/tests'
+  'data/rules'
 ]);
 
 const forbiddenExact = new Set([

@@ -2,7 +2,7 @@
 
 .PHONY: run build clean docker-build updater admin-build admin-typecheck admin-verify
 
-VERSION ?= 1.0.1
+VERSION ?= 1.1.0
 BUILD_DATE ?= unknown
 BUILD_TAGS ?=
 LDFLAGS = -s -w -X github.com/divinelabio/aegis/internal/core/admin.Version=$(VERSION) -X github.com/divinelabio/aegis/internal/core/admin.BuildDate=$(BUILD_DATE) -X main.Version=$(VERSION) -X main.BuildDate=$(BUILD_DATE)
@@ -29,10 +29,10 @@ clean:
 	rm -rf bin/
 
 admin-build:
-	npm run admin:build
+	npm --prefix web/admin run build
 
 admin-typecheck:
-	npm run admin:typecheck
+	npm --prefix web/admin run typecheck
 
 admin-verify:
 	npm run admin:verify

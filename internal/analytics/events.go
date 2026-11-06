@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/divinelabio/aegis/internal/infra/storage"
 	"github.com/divinelabio/aegis/internal/rules"
 	"github.com/google/uuid"
 )
@@ -29,6 +30,7 @@ type SecurityEvent struct {
 	MatchedFields map[string]string `json:"matched_fields,omitempty"`
 	ResponseCode  int               `json:"response_code"`
 	LatencyMs     int64             `json:"latency_ms,omitempty"`
+	RequestID     string            `json:"request_id,omitempty"`
 }
 
 type Query struct {
@@ -78,13 +80,37 @@ const insertSecurityEventQuery = `INSERT INTO section_events (id, timestamp, sec
 
 func NewStore(db *sql.DB) (*Store, error) {
 	if db == nil {
-		return nil, fmt.Errorf("ClickHouse analytics database is not initialized")
+		return nil, fmt.Errorf("analytics database is not initialized")
 	}
 	store := &Store{db: db}
 	return store, store.EnsureSchema()
 }
 
 func (s *Store) EnsureSchema() error {
+	if storage.ActiveAnalyticsDriver() == storage.DriverPostgreSQL {
+		_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS section_events (
+			id TEXT NOT NULL DEFAULT '',
+			timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			section TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '',
+			action TEXT NOT NULL DEFAULT '',
+			client_ip TEXT NOT NULL DEFAULT '',
+			method TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			status_code INTEGER NOT NULL DEFAULT 0,
+			latency_ms BIGINT NOT NULL DEFAULT 0,
+			country TEXT NOT NULL DEFAULT '',
+			user_agent TEXT NOT NULL DEFAULT '',
+			user_agent_family TEXT NOT NULL DEFAULT '',
+			rule_id TEXT NOT NULL DEFAULT '',
+			rule_name TEXT NOT NULL DEFAULT '',
+			rule_type TEXT NOT NULL DEFAULT '',
+			score INTEGER NOT NULL DEFAULT 0,
+			request_id TEXT NOT NULL DEFAULT '',
+			metadata TEXT NOT NULL DEFAULT ''
+		)`)
+		return err
+	}
 	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS section_events (
 		id String,
 		timestamp DateTime64(3, 'UTC'),
@@ -173,7 +199,7 @@ func securityEventValues(event SecurityEvent) []any {
 		event.RuleName,
 		event.RuleType,
 		int32(event.Score),
-		"",
+		event.RequestID,
 		string(fields),
 	}
 }
@@ -210,6 +236,8 @@ func securityEventFromRuleEvent(event rules.RuleEvent) SecurityEvent {
 			"tls_version":   event.Request.TLSVersion,
 		},
 		ResponseCode: event.Status,
+		LatencyMs:    event.LatencyMs,
+		RequestID:    event.Request.RequestID,
 	}
 }
 
@@ -374,6 +402,8 @@ func buildWhere(q Query) (string, []any) {
 		} else {
 			add("section = ?", q.Section)
 		}
+	} else {
+		clauses = append(clauses, "section != 'traffic'")
 	}
 	if q.Country != "" {
 		add("country = ?", q.Country)

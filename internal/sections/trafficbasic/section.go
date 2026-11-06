@@ -21,6 +21,7 @@ import (
 	"github.com/divinelabio/aegis/internal/infra/geoip"
 	"github.com/divinelabio/aegis/internal/infra/requestctx"
 	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/telemetry"
 	"github.com/divinelabio/aegis/internal/infra/transport"
 	"github.com/google/uuid"
 	"github.com/divinelabio/aegis/internal/sections"
@@ -452,38 +453,31 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		s.total.Add(1)
-		clientIP := requestctx.ClientIP(r)
+		identity, _ := requestctx.FromRequest(r)
+		clientIP := identity.ClientIP
 		if clientIP == "" {
 			clientIP = remoteHost(r.RemoteAddr)
 		}
+		geoData := identity.Geo
+		if geoData.State != requestctx.GeoKnown && s.geoService != nil {
+			geoData = s.geoService.Lookup(clientIP)
+		}
+		country := geoData.Country
+
 		s.mu.RLock()
 		list, limiter, tracker, geoBlocker := s.blacklist, s.limiter, s.connections, s.geoBlocker
 		s.mu.RUnlock()
 		tracker.TrackConnection(r.RemoteAddr)
 		defer tracker.ReleaseConnection(r.RemoteAddr)
 
-		if blocked, _ := list.IsBlocked(clientIP); blocked {
+		if blocked, reason := list.IsBlocked(clientIP); blocked {
 			s.blocked.Add(1)
 			s.blacklistBlocked.Add(1)
 			w.Header().Set("X-Aegis-Traffic", "blacklisted")
-			reqID := r.Header.Get("X-Request-Id")
-			if reqID == "" {
-				reqID = uuid.NewString()
+			if strings.TrimSpace(reason) == "" {
+				reason = "manual"
 			}
-			storage.LogSectionEvent(storage.SectionEventLog{
-				ID:         uuid.NewString(),
-				Timestamp:  time.Now().Unix(),
-				Section:    "traffic_control",
-				EventType:  "blacklist",
-				Action:     "block",
-				ClientIP:   clientIP,
-				Method:     r.Method,
-				Path:       r.URL.Path,
-				StatusCode: http.StatusForbidden,
-				RuleName:   "Manual Blacklist",
-				RequestID:  reqID,
-				UserAgent:  r.UserAgent(),
-			})
+			s.logTrafficDecision(r, "blacklist", "block", "traffic-blacklist", "Manual Blacklist", reason, clientIP, country, http.StatusForbidden, 12)
 			if !transport.WriteConfiguredErrorPage(w, r, http.StatusForbidden) {
 				http.Error(w, "Access denied", http.StatusForbidden)
 			}
@@ -491,34 +485,14 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 		}
 
 		if geoBlocker != nil {
-			identity, _ := requestctx.FromRequest(r)
-			geoData := identity.Geo
-			if geoData.State != requestctx.GeoKnown && s.geoService != nil {
-				geoData = s.geoService.Lookup(clientIP)
-			}
-			if blocked, _, _ := geoBlocker.IsBlocked(clientIP, geoData, routeCountryPolicy(r)); blocked {
+			if blocked, reason, _ := geoBlocker.IsBlocked(clientIP, geoData, routeCountryPolicy(r)); blocked {
 				s.blocked.Add(1)
 				s.geoBlocked.Add(1)
 				w.Header().Set("X-Aegis-Traffic", "geo-blocked")
-				reqID := r.Header.Get("X-Request-Id")
-				if reqID == "" {
-					reqID = uuid.NewString()
+				if strings.TrimSpace(reason) == "" {
+					reason = "geo_policy"
 				}
-				storage.LogSectionEvent(storage.SectionEventLog{
-					ID:         uuid.NewString(),
-					Timestamp:  time.Now().Unix(),
-					Section:    "traffic_control",
-					EventType:  "geo_block",
-					Action:     "block",
-					ClientIP:   clientIP,
-					Country:    geoData.Country,
-					Method:     r.Method,
-					Path:       r.URL.Path,
-					StatusCode: http.StatusForbidden,
-					RuleName:   "Country Policy",
-					RequestID:  reqID,
-					UserAgent:  r.UserAgent(),
-				})
+				s.logTrafficDecision(r, "geo_block", "block", "traffic-geo-policy", "Country Policy", reason, clientIP, country, http.StatusForbidden, 10)
 				if !transport.WriteConfiguredErrorPage(w, r, http.StatusForbidden) {
 					http.Error(w, "Access denied by country policy", http.StatusForbidden)
 				}
@@ -531,11 +505,21 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 			effectiveRate := s.config.RateLimit.DefaultRate
 			effectiveWindow := limiter.Window()
 			action := s.config.RateLimit.Action
+			ruleID := "traffic-ratelimit-default"
+			ruleName := "Rate Limit Exceeded"
 			if matchedRule != nil {
 				effectiveRate = matchedRule.Rate
 				effectiveWindow = matchedRule.Window
 				if matchedRule.Action != "" {
 					action = matchedRule.Action
+				}
+				rulePattern := matchedRule.Pattern
+				if rulePattern == "" {
+					rulePattern = matchedRule.PathPattern
+				}
+				if rulePattern != "" {
+					ruleID = "traffic-ratelimit:" + rulePattern
+					ruleName = "Rate Limit (" + rulePattern + ")"
 				}
 			}
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(effectiveRate))
@@ -552,30 +536,13 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 
 			if !allowed {
 				if strings.EqualFold(action, "dry_run") {
-					// Dry run mode: observe and report without blocking
+					s.logTrafficDecision(r, "rate_limit", "detect", ruleID, ruleName, "ratelimit_dry_run", clientIP, country, http.StatusOK, 5)
 				} else {
 					s.blocked.Add(1)
 					s.rateLimited.Add(1)
 					w.Header().Set("X-Aegis-Traffic", "rate-limited")
 					w.Header().Set("Retry-After", strconv.Itoa(resetSecs))
-					reqID := r.Header.Get("X-Request-Id")
-					if reqID == "" {
-						reqID = uuid.NewString()
-					}
-					storage.LogSectionEvent(storage.SectionEventLog{
-						ID:         uuid.NewString(),
-						Timestamp:  time.Now().Unix(),
-						Section:    "traffic_control",
-						EventType:  "rate_limit",
-						Action:     "ratelimit",
-						ClientIP:   clientIP,
-						Method:     r.Method,
-						Path:       r.URL.Path,
-						StatusCode: http.StatusTooManyRequests,
-						RuleName:   "Rate Limit Exceeded",
-						RequestID:  reqID,
-						UserAgent:  r.UserAgent(),
-					})
+					s.logTrafficDecision(r, "rate_limit", "ratelimit", ruleID, ruleName, "ratelimit_exceeded", clientIP, country, http.StatusTooManyRequests, 8)
 					if !transport.WriteConfiguredErrorPage(w, r, http.StatusTooManyRequests) {
 						http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 					}
@@ -587,6 +554,83 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 		s.allowed.Add(1)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Section) logTrafficDecision(r *http.Request, eventType, action, ruleID, ruleName, reason, clientIP, country string, status, score int) {
+	if r == nil {
+		return
+	}
+	identity, _ := requestctx.FromRequest(r)
+	reqID := telemetry.RequestIDFromRequest(r)
+	latencyMs := telemetry.RequestLatencyMs(r)
+
+	telemetry.UpdateRequestLogMetadata(r, telemetry.RequestLogMetadata{
+		Host:     r.Host,
+		RuleID:   ruleID,
+		RuleName: ruleName,
+		RuleType: eventType,
+		Action:   action,
+		Blocked:  action == "block" || action == "ratelimit",
+	})
+
+	severity := "medium"
+	if score >= 12 {
+		severity = "high"
+	}
+	categoriesJSON, _ := json.Marshal([]string{eventType})
+	severitiesJSON, _ := json.Marshal([]string{severity})
+	meta := map[string]string{
+		"host":         r.Host,
+		"query_string": r.URL.RawQuery,
+		"reason":       reason,
+		"category":     eventType,
+		"categories":   string(categoriesJSON),
+		"severity":     severity,
+		"severities":   string(severitiesJSON),
+	}
+	if ja3 := firstNonEmptyTraffic(identity.TLS.JA3, r.Header.Get("X-Aegis-TLS-JA3")); ja3 != "" {
+		meta["ja3"] = ja3
+	}
+	if ja4 := firstNonEmptyTraffic(identity.TLS.JA4, r.Header.Get("X-Aegis-TLS-JA4")); ja4 != "" {
+		meta["ja4"] = ja4
+	}
+	if asn := strings.TrimSpace(r.Header.Get("X-Aegis-ASN")); asn != "" {
+		meta["asn"] = asn
+	}
+	if asnOrg := strings.TrimSpace(r.Header.Get("X-Aegis-ASN-Org")); asnOrg != "" {
+		meta["asn_org"] = asnOrg
+	}
+	rawMeta, _ := json.Marshal(meta)
+
+	storage.LogSectionEvent(storage.SectionEventLog{
+		ID:         uuid.NewString(),
+		Timestamp:  time.Now().Unix(),
+		Section:    SectionID,
+		EventType:  eventType,
+		Action:     action,
+		ClientIP:   clientIP,
+		Country:    country,
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		StatusCode: status,
+		LatencyMs:  latencyMs,
+		RuleID:     ruleID,
+		RuleName:   ruleName,
+		RuleType:   eventType,
+		Score:      score,
+		RequestID:  reqID,
+		UserAgent:  r.UserAgent(),
+		Metadata:   string(rawMeta),
+	})
+}
+
+func firstNonEmptyTraffic(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func (s *Section) Stats() sections.SectionStats {
@@ -632,6 +676,8 @@ func (s *Section) RegisterRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc(prefix+"/stats", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.Stats()) })
 	mux.HandleFunc(prefix+"/dashboard", s.handleDashboard)
 	mux.HandleFunc(prefix+"/dashboard/", s.handleDashboard)
+	mux.HandleFunc(prefix+"/analytics", s.handleAnalytics)
+	mux.HandleFunc(prefix+"/analytics/", s.handleAnalytics)
 	mux.HandleFunc(prefix+"/geo/status", s.handleGeoStatus)
 	mux.HandleFunc(prefix+"/config", s.handleConfig)
 	mux.HandleFunc(prefix+"/capabilities", s.handleCapabilities)
@@ -921,16 +967,154 @@ func (s *Section) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func parseTrafficAnalyticsQuery(r *http.Request) storage.TrafficAnalyticsQuery {
+	q := r.URL.Query()
+	limit := 50
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	window := strings.TrimSpace(q.Get("window"))
+	if window == "" {
+		window = "24h"
+	}
+	return storage.TrafficAnalyticsQuery{
+		Window:    window,
+		Interval:  strings.TrimSpace(q.Get("interval")),
+		Action:    strings.TrimSpace(q.Get("action")),
+		Reason:    strings.TrimSpace(q.Get("reason")),
+		RuleType:  strings.TrimSpace(q.Get("rule_type")),
+		RuleID:    strings.TrimSpace(q.Get("rule_id")),
+		IP:        strings.TrimSpace(q.Get("ip")),
+		Path:      strings.TrimSpace(q.Get("path")),
+		Method:    strings.TrimSpace(q.Get("method")),
+		Country:   strings.TrimSpace(q.Get("country")),
+		Status:    strings.TrimSpace(q.Get("status")),
+		UserAgent: strings.TrimSpace(q.Get("user_agent")),
+		RequestID: strings.TrimSpace(q.Get("request_id")),
+		Limit:     limit,
+		Cursor:    strings.TrimSpace(q.Get("cursor")),
+		Sort:      strings.TrimSpace(q.Get("sort")),
+	}
+}
+
+func (s *Section) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	query := parseTrafficAnalyticsQuery(r)
+	idx := strings.Index(r.URL.Path, "/analytics")
+	subPath := ""
+	if idx >= 0 {
+		subPath = strings.Trim(r.URL.Path[idx+len("/analytics"):], "/")
+	}
+	switch {
+	case subPath == "" || subPath == "dashboard":
+		dashboard, err := storage.GetTrafficAnalyticsDashboard(query)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"success": true, "dashboard": dashboard})
+	case subPath == "summary":
+		summary, err := storage.GetTrafficAnalyticsSummary(query)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"success": true, "summary": summary, "health": storage.GetTrafficAnalyticsHealth()})
+	case subPath == "timeseries":
+		points, err := storage.GetTrafficAnalyticsTimeseries(query)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"success": true, "timeseries": points})
+	case subPath == "breakdown" || strings.HasPrefix(subPath, "breakdown/"):
+		dim := strings.TrimPrefix(subPath, "breakdown/")
+		if dim == "breakdown" || dim == "" {
+			dim = strings.TrimSpace(r.URL.Query().Get("dimension"))
+		}
+		if dim == "" {
+			dim = "reasons"
+		}
+		items, err := storage.GetTrafficAnalyticsBreakdown(query, dim)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"success": true, "dimension": dim, "items": items})
+	case subPath == "events":
+		page, err := storage.GetTrafficAnalyticsEvents(query)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]interface{}{
+			"success":     true,
+			"events":      page.Events,
+			"total":       page.Count,
+			"count":       page.Count,
+			"next_cursor": page.NextCursor,
+		})
+	case strings.HasPrefix(subPath, "events/"):
+		id := strings.TrimPrefix(subPath, "events/")
+		ev, err := storage.GetTrafficAnalyticsEvent(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if ev == nil {
+			http.Error(w, "Event not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"success": true, "event": ev})
+	case subPath == "health":
+		writeJSON(w, map[string]interface{}{"success": true, "health": storage.GetTrafficAnalyticsHealth()})
+	default:
+		http.Error(w, "Traffic analytics endpoint not found", http.StatusNotFound)
+	}
+}
+
 func (s *Section) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	stats := s.Stats()
+	query := parseTrafficAnalyticsQuery(r)
 	if strings.Contains(r.URL.Path, "/events") {
+		if storage.DB != nil {
+			if page, err := storage.GetTrafficAnalyticsEvents(query); err == nil {
+				writeJSON(w, map[string]interface{}{
+					"events":      page.Events,
+					"total":       page.Count,
+					"count":       page.Count,
+					"next_cursor": page.NextCursor,
+				})
+				return
+			}
+		}
 		writeJSON(w, map[string]interface{}{"events": []interface{}{}, "total": 0})
 		return
 	}
+
+	if storage.DB != nil {
+		if dashboard, err := storage.GetTrafficAnalyticsDashboard(query); err == nil {
+			stats := s.Stats()
+			if ac, ok := stats.Custom["active_connections"].(int); ok {
+				dashboard.Summary.ActiveConnections = int64(ac)
+				dashboard.ActiveControls.ActiveConnections = int64(ac)
+			}
+			writeJSON(w, map[string]interface{}{
+				"dashboard": dashboard,
+			})
+			return
+		}
+	}
+
+	stats := s.Stats()
 
 	reasons := []map[string]interface{}{}
 	blCount := s.blacklistBlocked.Load()

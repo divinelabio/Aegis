@@ -223,7 +223,7 @@ func IsBotRuleField(field string) bool {
 		return true
 	}
 	switch field {
-	case "ip.src", "ip.geoip.country", "ip.reputation.score",
+	case "ip.src", "ip.asn", "ip.geoip.country", "ip.reputation.score",
 		"http.host", "http.request.uri.path", "http.request.method", "http.user_agent",
 		"aegis.bot.score", "aegis.bot.category", "aegis.bot.verified", "aegis.bot.headless",
 		"tls.version", "tls.ja3", "tls.ja4":

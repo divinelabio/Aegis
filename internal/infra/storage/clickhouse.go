@@ -33,25 +33,69 @@ var (
 	wafDroppedEvents      atomic.Int64
 	analyticsConfigMu     sync.RWMutex
 	activeAnalyticsConfig AnalyticsConfig
+	analyticsWorkersOnce  sync.Once
 )
 
-// InitAnalytics resolves the ClickHouse secret reference, initializes the
-// analytics schema, and starts the bounded telemetry writers. The returned
-// availability lets the caller distinguish optional degradation from an active
-// analytics plane without touching PostgreSQL control state.
+// InitAnalytics initializes the configured analytics store (PostgreSQL by
+// default, or ClickHouse when selected), applies its schema, and starts the
+// bounded telemetry writers and 30-day retention worker.
 func InitAnalytics(config AnalyticsConfig) (available bool, err error) {
-	mode := config.EffectiveMode()
-	if mode == AnalyticsModeDisabled {
+	config.Mode = config.EffectiveMode()
+	config.Driver = config.EffectiveDriver()
+	config.RetentionDays = config.EffectiveRetentionDays()
+	if config.Mode == AnalyticsModeDisabled {
 		return false, nil
+	}
+	if err := config.Validate(); err != nil {
+		return false, err
+	}
+	if config.Driver == DriverPostgreSQL {
+		if err := initPostgresAnalyticsDB(config); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	cfg, err := config.runtimeConfig()
 	if err != nil {
+		if config.Mode == AnalyticsModeOptional {
+			fallback := config
+			fallback.Driver = DriverPostgreSQL
+			if pgErr := initPostgresAnalyticsDB(fallback); pgErr == nil {
+				return true, nil
+			}
+		}
 		return false, err
 	}
 	if err := initClickHouseDB(config, cfg); err != nil {
+		if config.Mode == AnalyticsModeOptional {
+			fallback := config
+			fallback.Driver = DriverPostgreSQL
+			if pgErr := initPostgresAnalyticsDB(fallback); pgErr == nil {
+				return true, nil
+			}
+		}
 		return false, err
 	}
 	return true, nil
+}
+
+// ActiveAnalyticsDriver returns the currently active analytics driver (defaulting to PostgreSQL).
+func ActiveAnalyticsDriver() DBDriver {
+	analyticsConfigMu.RLock()
+	defer analyticsConfigMu.RUnlock()
+	return activeAnalyticsConfig.EffectiveDriver()
+}
+
+func startAnalyticsWorkers(retentionDays int) {
+	analyticsWorkersOnce.Do(func() {
+		requestLogChan = make(chan RequestLog, 10000)
+		wafLogChan = make(chan WAFEventLog, 10000)
+		sectionLogChan = make(chan SectionEventLog, 20000)
+		go processRequestLogs()
+		go processWAFLogs()
+		go processSectionEvents()
+		go runRetentionWorker(retentionDays)
+	})
 }
 
 func initClickHouseDB(config AnalyticsConfig, cfg clickHouseRuntimeConfig) error {
@@ -106,23 +150,35 @@ func initClickHouseDB(config AnalyticsConfig, cfg clickHouseRuntimeConfig) error
 	activeAnalyticsConfig = config
 	analyticsConfigMu.Unlock()
 
-	requestLogChan = make(chan RequestLog, 10000)
-	wafLogChan = make(chan WAFEventLog, 10000)
-	sectionLogChan = make(chan SectionEventLog, 20000)
-	go processRequestLogs()
-	go processWAFLogs()
-	go processSectionEvents()
-	go pruneOldData()
+	startAnalyticsWorkers(config.EffectiveRetentionDays())
 	return nil
 }
 
-// AnalyticsConfigIsActive reports whether the active ClickHouse client was
+// AnalyticsConfigIsActive reports whether the active analytics client was
 // started from this configuration. Configuration persistence never hot-swaps
 // the client, so a mismatch is a truthful restart-required signal.
 func AnalyticsConfigIsActive(config AnalyticsConfig) bool {
 	analyticsConfigMu.RLock()
 	defer analyticsConfigMu.RUnlock()
-	return DB != nil && activeAnalyticsConfig == config
+	if DB == nil {
+		return false
+	}
+	active := activeAnalyticsConfig
+	active.Mode = active.EffectiveMode()
+	active.Driver = active.EffectiveDriver()
+	active.RetentionDays = active.EffectiveRetentionDays()
+
+	candidate := config
+	candidate.Mode = candidate.EffectiveMode()
+	candidate.Driver = candidate.EffectiveDriver()
+	candidate.RetentionDays = candidate.EffectiveRetentionDays()
+	if active.Driver == DriverPostgreSQL && candidate.Driver == DriverPostgreSQL {
+		return active.Mode == candidate.Mode &&
+			active.Driver == candidate.Driver &&
+			active.RetentionDays == candidate.RetentionDays &&
+			strings.TrimSpace(active.Host) == strings.TrimSpace(candidate.Host)
+	}
+	return active == candidate
 }
 
 // clickhouseTLSConfig keeps certificate hostname verification tied to the
@@ -297,6 +353,29 @@ func applyMigrations(db *sql.DB) error {
 		) ENGINE = MergeTree
 		PARTITION BY toYYYYMM(timestamp)
 		ORDER BY (timestamp, section, action, client_ip)`,
+		`CREATE TABLE IF NOT EXISTS endpoints (
+			id String,
+			method LowCardinality(String),
+			path String,
+			hits UInt64,
+			last_seen DateTime64(3, 'UTC'),
+			status LowCardinality(String),
+			is_active UInt8
+		) ENGINE = ReplacingMergeTree(last_seen)
+		ORDER BY (method, path)`,
+		`CREATE TABLE IF NOT EXISTS schemas (
+			id String,
+			endpoint_id String,
+			name String,
+			format LowCardinality(String),
+			type LowCardinality(String),
+			endpoints UInt32,
+			strict UInt8,
+			is_active UInt8,
+			content String,
+			updated_at DateTime64(3, 'UTC')
+		) ENGINE = ReplacingMergeTree(updated_at)
+		ORDER BY id`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
@@ -309,14 +388,44 @@ func applyMigrations(db *sql.DB) error {
 	return nil
 }
 
+func runRetentionWorker(retentionDays int) {
+	if retentionDays <= 0 || retentionDays > MaxAnalyticsRetentionDays {
+		retentionDays = DefaultAnalyticsRetentionDays
+	}
+	pruneOldDataWithRetention(retentionDays)
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		pruneOldDataWithRetention(retentionDays)
+	}
+}
+
 func pruneOldData() {
+	analyticsConfigMu.RLock()
+	retentionDays := activeAnalyticsConfig.EffectiveRetentionDays()
+	analyticsConfigMu.RUnlock()
+	pruneOldDataWithRetention(retentionDays)
+}
+
+func pruneOldDataWithRetention(retentionDays int) {
 	if DB == nil {
 		return
 	}
-	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	if retentionDays <= 0 || retentionDays > MaxAnalyticsRetentionDays {
+		retentionDays = DefaultAnalyticsRetentionDays
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	if ActiveAnalyticsDriver() == DriverPostgreSQL {
+		_, _ = DB.Exec("DELETE FROM access_events WHERE timestamp < ?", cutoff)
+		_, _ = DB.Exec("DELETE FROM waf_events WHERE timestamp < ?", cutoff)
+		_, _ = DB.Exec("DELETE FROM section_events WHERE timestamp < ?", cutoff)
+		_, _ = DB.Exec("DELETE FROM security_events WHERE timestamp < ?", cutoff)
+		return
+	}
 	_, _ = DB.Exec("ALTER TABLE access_events DELETE WHERE timestamp < ?", cutoff)
 	_, _ = DB.Exec("ALTER TABLE waf_events DELETE WHERE timestamp < ?", cutoff)
 	_, _ = DB.Exec("ALTER TABLE section_events DELETE WHERE timestamp < ?", cutoff)
+	_, _ = DB.Exec("ALTER TABLE security_events DELETE WHERE timestamp < ?", cutoff)
 }
 
 type RequestLog struct {
@@ -332,9 +441,11 @@ type RequestLog struct {
 	Referer             string
 	Country             string
 	Blocked             bool
+	Action              string
 	RuleID              string
 	RuleName            string
 	RuleType            string
+	Score               int
 	RequestID           string
 	Upstream            string
 	RouteName           string
@@ -347,6 +458,7 @@ type RequestLog struct {
 	TLSVersion          string
 	IPVersion           string
 	ResponseContentType string
+	ExtraMetadata       map[string]string
 }
 
 func LogRequest(l RequestLog) {
@@ -355,6 +467,11 @@ func LogRequest(l RequestLog) {
 		section = "traffic"
 	}
 	metadata := map[string]string{}
+	for k, v := range l.ExtraMetadata {
+		if strings.TrimSpace(v) != "" {
+			metadata[k] = v
+		}
+	}
 	if l.Host != "" {
 		metadata["host"] = l.Host
 	}
@@ -394,12 +511,28 @@ func LogRequest(l RequestLog) {
 	if l.ResponseContentType != "" {
 		metadata["response_content_type"] = strings.ToLower(strings.TrimSpace(l.ResponseContentType))
 	}
+	if l.RuleID != "" {
+		metadata["rule_id"] = l.RuleID
+	}
+	if l.RuleName != "" {
+		metadata["rule_name"] = l.RuleName
+	}
+	if l.RuleType != "" {
+		metadata["rule_type"] = l.RuleType
+	}
+	if l.Score > 0 {
+		metadata["score"] = strconv.Itoa(l.Score)
+		metadata["anomaly_score"] = strconv.Itoa(l.Score)
+	}
+	if section != "" {
+		metadata["section"] = section
+	}
 	rawMetadata, _ := json.Marshal(metadata)
 	LogSectionEvent(SectionEventLog{
 		Timestamp:       l.Timestamp,
 		Section:         section,
 		EventType:       "http_request",
-		Action:          requestAction(l.Status, l.Blocked),
+		Action:          requestAction(l.Status, l.Blocked, l.Action),
 		ClientIP:        l.IP,
 		Method:          l.Method,
 		Path:            l.Path,
@@ -411,6 +544,7 @@ func LogRequest(l RequestLog) {
 		RuleID:          l.RuleID,
 		RuleName:        l.RuleName,
 		RuleType:        l.RuleType,
+		Score:           l.Score,
 		RequestID:       l.RequestID,
 		Metadata:        string(rawMetadata),
 	})
@@ -443,24 +577,24 @@ func flushRequestLogs(batch []RequestLog) {
 	}
 	tx, err := DB.Begin()
 	if err != nil {
-		log.Printf("Failed to begin ClickHouse request batch: %v", err)
+		log.Printf("Failed to begin analytics request batch: %v", err)
 		return
 	}
-	stmt, err := tx.Prepare("INSERT INTO access_events")
+	stmt, err := tx.Prepare("INSERT INTO access_events (timestamp, ip, path, method, status, latency_ms, user_agent, referer, country, blocked, rule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		_ = tx.Rollback()
-		log.Printf("Failed to prepare ClickHouse request batch: %v", err)
+		log.Printf("Failed to prepare analytics request batch: %v", err)
 		return
 	}
 	for _, l := range batch {
 		_, err = stmt.Exec(time.Unix(l.Timestamp, 0).UTC(), l.IP, l.Path, l.Method, uint16(l.Status), l.LatencyMs, l.UserAgent, l.Referer, l.Country, boolToUInt8(l.Blocked), l.RuleID)
 		if err != nil {
-			log.Printf("Failed to append ClickHouse request event: %v", err)
+			log.Printf("Failed to append analytics request event: %v", err)
 		}
 	}
 	_ = stmt.Close()
 	if err := tx.Commit(); err != nil {
-		log.Printf("Failed to commit ClickHouse request batch: %v", err)
+		log.Printf("Failed to commit analytics request batch: %v", err)
 	}
 }
 
@@ -489,6 +623,10 @@ type WAFEventLog struct {
 	ResponseSize               int64
 	Country                    string
 	City                       string
+	ASN                        string
+	ASNOrg                     string
+	JA3                        string
+	JA4                        string
 	RequestID                  string
 	Severities                 string
 	MatchedFields              string
@@ -522,30 +660,6 @@ type WAFEventLog struct {
 }
 
 func LogWAFEvent(l WAFEventLog) {
-	l.Action = normalizeWAFAction(l.Action)
-	meta, _ := json.Marshal(sanitizedWAFMetadata(l))
-	if !LogSectionEvent(SectionEventLog{
-		ID:              l.EventID,
-		Timestamp:       l.Timestamp,
-		Section:         "waf_core",
-		EventType:       "waf",
-		Action:          l.Action,
-		ClientIP:        l.IP,
-		Method:          l.Method,
-		Path:            l.Path,
-		StatusCode:      l.StatusCode,
-		LatencyMs:       l.LatencyMs,
-		Country:         l.Country,
-		UserAgent:       l.UserAgent,
-		UserAgentFamily: userAgentFamily(l.UserAgent),
-		RuleID:          firstJSONValue(l.RuleIDs),
-		RuleName:        firstJSONValue(l.RuleMessages),
-		Score:           l.AnomalyScore,
-		RequestID:       l.RequestID,
-		Metadata:        string(meta),
-	}) {
-		wafDroppedEvents.Add(1)
-	}
 	if wafLogChan == nil {
 		return
 	}
@@ -592,6 +706,10 @@ func sanitizedWAFMetadata(l WAFEventLog) map[string]string {
 		meta["response_inspection_us"] = strconv.FormatInt(l.ResponseInspectionUs, 10)
 	}
 	add("city", l.City)
+	add("asn", l.ASN)
+	add("asn_org", l.ASNOrg)
+	add("ja3", l.JA3)
+	add("ja4", l.JA4)
 	add("client_ip_source", l.ClientIPSource)
 	add("rule_source", l.RuleSource)
 	add("rule_sources", l.RuleSources)
@@ -686,24 +804,24 @@ func flushWAFLogs(batch []WAFEventLog) {
 	}
 	tx, err := DB.Begin()
 	if err != nil {
-		log.Printf("Failed to begin ClickHouse WAF batch: %v", err)
+		log.Printf("Failed to begin analytics WAF batch: %v", err)
 		return
 	}
-	stmt, err := tx.Prepare("INSERT INTO waf_events")
+	stmt, err := tx.Prepare("INSERT INTO waf_events (timestamp, ip, method, path, query_string, user_agent, host, action, anomaly_score, rule_ids, rule_messages, categories, status_code, latency_ms, request_size, response_size, country, city) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		_ = tx.Rollback()
-		log.Printf("Failed to prepare ClickHouse WAF batch: %v", err)
+		log.Printf("Failed to prepare analytics WAF batch: %v", err)
 		return
 	}
 	for _, l := range batch {
 		_, err = stmt.Exec(time.Unix(l.Timestamp, 0).UTC(), l.IP, l.Method, l.Path, l.QueryString, l.UserAgent, l.Host, l.Action, int32(l.AnomalyScore), l.RuleIDs, l.RuleMessages, l.Categories, uint16(l.StatusCode), l.LatencyMs, l.RequestSize, l.ResponseSize, l.Country, l.City)
 		if err != nil {
-			log.Printf("Failed to append ClickHouse WAF event: %v", err)
+			log.Printf("Failed to append analytics WAF event: %v", err)
 		}
 	}
 	_ = stmt.Close()
 	if err := tx.Commit(); err != nil {
-		log.Printf("Failed to commit ClickHouse WAF batch: %v", err)
+		log.Printf("Failed to commit analytics WAF batch: %v", err)
 	}
 }
 
@@ -814,7 +932,31 @@ type SectionEventLog struct {
 	Metadata        string
 }
 
+var (
+	sectionEventHookMu sync.RWMutex
+	sectionEventHook   func(SectionEventLog)
+)
+
+// SetSectionEventHookForTest registers a hook called whenever LogSectionEvent is invoked.
+func SetSectionEventHookForTest(hook func(SectionEventLog)) func() {
+	sectionEventHookMu.Lock()
+	prev := sectionEventHook
+	sectionEventHook = hook
+	sectionEventHookMu.Unlock()
+	return func() {
+		sectionEventHookMu.Lock()
+		sectionEventHook = prev
+		sectionEventHookMu.Unlock()
+	}
+}
+
 func LogSectionEvent(l SectionEventLog) bool {
+	sectionEventHookMu.RLock()
+	hook := sectionEventHook
+	sectionEventHookMu.RUnlock()
+	if hook != nil {
+		hook(l)
+	}
 	if sectionLogChan == nil {
 		return false
 	}
@@ -866,13 +1008,13 @@ func flushSectionEvents(batch []SectionEventLog) {
 	}
 	tx, err := DB.Begin()
 	if err != nil {
-		log.Printf("Failed to begin ClickHouse section event batch: %v", err)
+		log.Printf("Failed to begin analytics section event batch: %v", err)
 		return
 	}
-	stmt, err := tx.Prepare("INSERT INTO section_events")
+	stmt, err := tx.Prepare("INSERT INTO section_events (id, timestamp, section, event_type, action, client_ip, method, path, status_code, latency_ms, country, user_agent, user_agent_family, rule_id, rule_name, rule_type, score, request_id, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		_ = tx.Rollback()
-		log.Printf("Failed to prepare ClickHouse section event batch: %v", err)
+		log.Printf("Failed to prepare analytics section event batch: %v", err)
 		return
 	}
 	for _, l := range batch {
@@ -898,16 +1040,33 @@ func flushSectionEvents(batch []SectionEventLog) {
 			l.Metadata,
 		)
 		if err != nil {
-			log.Printf("Failed to append ClickHouse section event: %v", err)
+			log.Printf("Failed to append analytics section event: %v", err)
 		}
 	}
 	_ = stmt.Close()
 	if err := tx.Commit(); err != nil {
-		log.Printf("Failed to commit ClickHouse section event batch: %v", err)
+		log.Printf("Failed to commit analytics section event batch: %v", err)
 	}
 }
 
-func requestAction(status int, blocked bool) string {
+func requestAction(status int, blocked bool, explicitAction ...string) string {
+	if len(explicitAction) > 0 {
+		switch strings.ToLower(strings.TrimSpace(explicitAction[0])) {
+		case "block", "blocked", "deny", "denied":
+			return "block"
+		case "ratelimit", "rate_limit", "throttle":
+			return "ratelimit"
+		case "challenge", "challenged":
+			return "challenge"
+		case "detect", "detected", "flag", "flagged", "log":
+			return "detect"
+		case "redirect", "redirected":
+			return "redirect"
+		}
+	}
+	if status == 429 {
+		return "ratelimit"
+	}
 	if blocked || status == 403 {
 		return "block"
 	}

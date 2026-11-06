@@ -1,0 +1,116 @@
+
+.users-page {
+  padding: var(--cds-spacing-07, 32px) var(--cds-spacing-07, 32px) var(--cds-spacing-12, 80px);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.users-page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-spacing-03, 12px);
+}
+
+.users-notification {
+  margin-bottom: var(--cds-spacing-05, 20px);
+  width: 100%;
+}
+
+.users-tabs {
+  margin-bottom: var(--cds-spacing-05, 20px);
+}
+
+.users-table-user-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-spacing-03, 10px);
+}
+
+.users-table-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--cds-layer-02, rgba(255, 255, 255, 0.08));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cds-icon-primary);
+  flex-shrink: 0;
+}
+
+.users-table-username {
+  font-weight: 600;
+  color: var(--cds-text-primary);
+}
+
+.users-you-pill {
+  font-size: 11px;
+  color: var(--cds-text-secondary);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.users-perm-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-spacing-03, 12px);
+}
+
+.users-perm-picker-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--cds-spacing-02, 8px);
+}
+
+.users-perm-picker-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-field);
+  padding: var(--cds-spacing-04, 16px);
+  box-sizing: border-box;
+}
+
+.users-perm-group {
+  margin-bottom: var(--cds-spacing-04, 16px);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.users-perm-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--cds-spacing-02, 6px);
+  border-bottom: 1px solid var(--cds-border-subtle);
+  margin-bottom: var(--cds-spacing-02, 8px);
+}
+
+.users-perm-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cds-text-primary);
+}
+
+.users-perm-item {
+  display: flex;
+  flex-direction: column;
+  padding: var(--cds-spacing-01, 4px) 0;
+
+  .cds--checkbox-label-text {
+    font-size: 13px;
+  }
+}
+
+.users-perm-desc {
+  font-size: 12px;
+  color: var(--cds-text-secondary);
+  padding-left: 28px;
+  margin-top: -2px;
+}

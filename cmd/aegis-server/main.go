@@ -17,7 +17,6 @@ import (
 	"github.com/divinelabio/aegis/internal/analytics"
 	"github.com/divinelabio/aegis/internal/app"
 	"github.com/divinelabio/aegis/internal/core/admin"
-	"github.com/divinelabio/aegis/internal/core/admin/handlers"
 	"github.com/divinelabio/aegis/internal/core/pipeline"
 	"github.com/divinelabio/aegis/internal/core/user"
 	"github.com/divinelabio/aegis/internal/infra/config"
@@ -39,7 +38,7 @@ import (
 //
 //	-X main.Version=1.0.0 -X main.BuildDate=2025-01-01
 var (
-	Version   = "1.0.1"
+	Version   = "dev"
 	BuildDate = "unknown"
 
 	// CommercialInit is nil in Community builds. The Professional and
@@ -130,7 +129,11 @@ func parseCLI(args []string) (command string, configPath string, envPath string,
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--build-info" {
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"version": Version, "build_tier": string(app.DefaultBundle().CompiledTier()), "build_date": BuildDate})
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"version":    Version,
+			"build_tier": string(app.DefaultBundle().CompiledTier()),
+			"build_date": BuildDate,
+		})
 		return
 	}
 	cmd, configPath, envPath, err := parseCLI(os.Args[1:])
@@ -204,12 +207,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to initialize PostgreSQL control database", zap.Error(err))
 	}
-	defer func() {
-		// Workers can retain pooled connections until their lifetime ends.
-		// Cancel them before waiting for the pool to close, including early exits.
-		cancel()
-		storage.CloseControlDB()
-	}()
+	defer storage.CloseControlDB()
 	userRepo, err := user.NewPostgreSQLRepository(ctx, controlDB)
 	if err != nil {
 		logger.Fatal("Failed to initialize PostgreSQL control repository", zap.Error(err))
@@ -224,6 +222,7 @@ func main() {
 	} else {
 		logger.Info("PostgreSQL KPI rollup schema verified")
 	}
+	go kpiRollupStore.StartRollupWorker(ctx, 1*time.Minute)
 	errorPagesDocument, errorPagesImported, err := config.InitializeErrorPagesControlPlane(ctx, controlConfigStore, cfg)
 	if err != nil {
 		logger.Fatal("Failed to initialize Error Pages control-plane configuration", zap.Error(err))
@@ -417,16 +416,17 @@ func main() {
 		logger.Fatal("Failed to start CAPTCHA control-plane listener", zap.Error(err))
 	}
 
-	// 4. Initialize optional ClickHouse analytics after the transactional
-	// control plane. Analytics failure must not prevent a PostgreSQL-backed
-	// self-hosted deployment from enforcing its committed controls.
+	// 4. Initialize analytics storage (PostgreSQL by default, ClickHouse optional)
+	// after the transactional control plane. Analytics failure in optional mode
+	// must not prevent a PostgreSQL-backed deployment from enforcing controls.
 	analyticsMode := cfg.Storage.Analytics.EffectiveMode()
+	analyticsDriver := cfg.Storage.Analytics.EffectiveDriver()
 	analyticsAvailable, analyticsInitErr := storage.InitAnalytics(cfg.Storage.Analytics)
 	if analyticsInitErr != nil {
 		if analyticsMode == storage.AnalyticsModeRequired {
-			logger.Fatal("Failed to initialize required ClickHouse analytics database", zap.Error(analyticsInitErr))
+			logger.Fatal("Failed to initialize required analytics database", zap.String("driver", string(analyticsDriver)), zap.Error(analyticsInitErr))
 		}
-		logger.Warn("ClickHouse analytics is unavailable; continuing with PostgreSQL control plane only", zap.Error(analyticsInitErr))
+		logger.Warn("Analytics storage is unavailable; continuing with PostgreSQL control plane only", zap.String("driver", string(analyticsDriver)), zap.Error(analyticsInitErr))
 	}
 	if err := telemetry.InitAccessLogger(telemetry.AccessLogConfig{
 		Enabled:      cfg.AccessLog.Enabled,
@@ -446,22 +446,18 @@ func main() {
 		if err != nil {
 			logger.Fatal("Failed to initialize analytics store", zap.Error(err))
 		}
+		logger.Info("Analytics storage initialized",
+			zap.String("driver", string(analyticsDriver)),
+			zap.Int("retention_days", cfg.Storage.Analytics.EffectiveRetentionDays()),
+		)
 	} else {
-		logger.Info("ClickHouse analytics disabled", zap.String("mode", string(analyticsMode)))
+		logger.Info("Analytics storage disabled", zap.String("driver", string(analyticsDriver)), zap.String("mode", string(analyticsMode)))
 	}
 
 	logger.Info("Starting Aegis WAF", zap.Int("port", cfg.Server.Port))
 
 	unifiedMetrics := metrics.NewUnifiedCollector()
 	healthHandler := health.NewHandler(Version)
-	healthHandler.Licensing = func() (string, string) {
-		build := string(app.DefaultBundle().CompiledTier())
-		manager := handlers.GetLicenseManager()
-		if manager == nil {
-			return build, "community"
-		}
-		return build, string(manager.Snapshot().EffectiveTier)
-	}
 
 	geoConfig, err := cfg.GeoConfig()
 	if err != nil {
@@ -550,12 +546,12 @@ func main() {
 	})
 	healthHandler.RegisterCheck(func() health.Check {
 		if analyticsAvailable {
-			return health.Check{Name: "Analytics", Status: health.StatusHealthy, Message: "ClickHouse analytics available"}
+			return health.Check{Name: "Analytics", Status: health.StatusHealthy, Message: fmt.Sprintf("%s analytics available (%d-day retention)", analyticsDriver, cfg.Storage.Analytics.EffectiveRetentionDays())}
 		}
 		if analyticsMode == storage.AnalyticsModeOptional {
-			return health.Check{Name: "Analytics", Status: health.StatusDegraded, Message: "ClickHouse analytics unavailable; control plane remains active"}
+			return health.Check{Name: "Analytics", Status: health.StatusDegraded, Message: fmt.Sprintf("%s analytics unavailable; control plane remains active", analyticsDriver)}
 		}
-		return health.Check{Name: "Analytics", Status: health.StatusHealthy, Message: "ClickHouse analytics disabled by configuration"}
+		return health.Check{Name: "Analytics", Status: health.StatusHealthy, Message: "Analytics disabled by configuration"}
 	})
 
 	// 5. Build pipeline
@@ -1073,8 +1069,6 @@ func main() {
 		break
 	}
 
-	// Stop context-owned workers before draining services and their database pool.
-	cancel()
 	shutdownCtx, cancel2 := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel2()
 	if err := sectionMgr.Stop(shutdownCtx); err != nil {

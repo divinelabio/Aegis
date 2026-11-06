@@ -50,6 +50,8 @@ type WAFAnalyticsQuery struct {
 	Limit           int
 	Cursor          string
 	Sort            string
+	Search          string
+	Q               string
 }
 
 type WAFAnalyticsSummary struct {
@@ -105,21 +107,30 @@ type WAFAnalyticsEvent struct {
 	QueryString                string            `json:"query_string"`
 	StatusCode                 int               `json:"status_code"`
 	Action                     string            `json:"action"`
+	Blocked                    bool              `json:"blocked"`
 	UserAgent                  string            `json:"user_agent"`
 	RuleID                     string            `json:"rule_id"`
 	RuleName                   string            `json:"rule_name"`
 	RuleIDs                    []string          `json:"rule_ids"`
 	RuleMessages               []string          `json:"rule_messages"`
 	Categories                 []string          `json:"categories"`
+	Category                   string            `json:"category,omitempty"`
 	Severities                 []string          `json:"severities"`
+	Severity                   string            `json:"severity,omitempty"`
 	MatchedFields              []string          `json:"matched_fields"`
 	RuleCount                  int               `json:"rule_count"`
 	AnomalyScore               int               `json:"anomaly_score"`
+	Score                      int               `json:"score"`
 	LatencyMs                  int64             `json:"latency_ms"`
 	RequestID                  string            `json:"request_id"`
 	RequestSize                int64             `json:"request_size"`
 	ResponseSize               int64             `json:"response_size"`
 	UserAgentFamily            string            `json:"user_agent_family"`
+	ASN                        string            `json:"asn,omitempty"`
+	ASNOrg                     string            `json:"asn_org,omitempty"`
+	Upstream                   string            `json:"upstream,omitempty"`
+	JA3                        string            `json:"ja3,omitempty"`
+	JA4                        string            `json:"ja4,omitempty"`
 	RuleSource                 string            `json:"rule_source,omitempty"`
 	PolicyID                   string            `json:"policy_id,omitempty"`
 	PolicyName                 string            `json:"policy_name,omitempty"`
@@ -736,7 +747,7 @@ func ResolveWAFAnalyticsInterval(window, interval string) (string, error) {
 			return "1h", nil
 		case "7d":
 			return "1h", nil
-		case "30d":
+		case "30d", "all":
 			return "1d", nil
 		default:
 			duration, err := time.ParseDuration(normalizedWindow)
@@ -818,11 +829,29 @@ func buildWAFAnalyticsWhere(q WAFAnalyticsQuery) (string, []any, error) {
 	}
 
 	if action := strings.TrimSpace(q.Action); action != "" {
-		action = normalizeWAFAction(action)
-		add(normalizedActionSQL()+" = ?", action)
+		if strings.Contains(action, ",") {
+			parts := strings.Split(action, ",")
+			placeholders := make([]string, 0, len(parts))
+			for _, part := range parts {
+				part = strings.TrimSpace(part)
+				if part == "" {
+					continue
+				}
+				placeholders = append(placeholders, "?")
+				args = append(args, normalizeWAFAction(part))
+			}
+			if len(placeholders) > 0 {
+				clauses = append(clauses, normalizedActionSQL()+" IN ("+strings.Join(placeholders, ", ")+")")
+			}
+		} else {
+			action = normalizeWAFAction(action)
+			add(normalizedActionSQL()+" = ?", action)
+		}
 	}
 	if q.Category != "" {
-		add("lower(JSONExtractString(metadata, 'categories')) LIKE ?", "%"+strings.ToLower(strings.TrimSpace(q.Category))+"%")
+		cat := "%" + strings.ToLower(strings.TrimSpace(q.Category)) + "%"
+		clauses = append(clauses, "(lower(JSONExtractString(metadata, 'categories')) LIKE ? OR lower(JSONExtractString(metadata, 'category')) LIKE ? OR lower(JSONExtractString(metadata, 'threat_type')) LIKE ? OR lower(JSONExtractString(metadata, 'bot_category')) LIKE ?)")
+		args = append(args, cat, cat, cat, cat)
 	}
 	if q.RuleID != "" {
 		ruleID := strings.TrimSpace(q.RuleID)
@@ -869,7 +898,9 @@ func buildWAFAnalyticsWhere(q WAFAnalyticsQuery) (string, []any, error) {
 		}
 	}
 	if q.Severity != "" {
-		add("lower(JSONExtractString(metadata, 'severities')) LIKE ?", "%"+strings.ToLower(strings.TrimSpace(q.Severity))+"%")
+		sev := "%" + strings.ToLower(strings.TrimSpace(q.Severity)) + "%"
+		clauses = append(clauses, "(lower(JSONExtractString(metadata, 'severities')) LIKE ? OR lower(JSONExtractString(metadata, 'severity')) LIKE ? OR lower(JSONExtractString(metadata, 'threat_severity')) LIKE ?)")
+		args = append(args, sev, sev, sev)
 	}
 	if q.MatchedField != "" {
 		add("lower(JSONExtractString(metadata, 'matched_fields')) LIKE ?", "%"+strings.ToLower(strings.TrimSpace(q.MatchedField))+"%")
@@ -896,6 +927,15 @@ func buildWAFAnalyticsWhere(q WAFAnalyticsQuery) (string, []any, error) {
 		policy := strings.TrimSpace(q.Policy)
 		clauses = append(clauses, "(policy_name = ? OR policy_id = ? OR JSONExtractString(metadata, 'policy_name') = ? OR JSONExtractString(metadata, 'policy_id') = ?)")
 		args = append(args, policy, policy, policy, policy)
+	}
+	if search := strings.TrimSpace(q.Q); search != "" {
+		pattern := "%" + strings.ToLower(search) + "%"
+		clauses = append(clauses, "(lower(client_ip) LIKE ? OR lower(path) LIKE ? OR lower(rule_id) LIKE ? OR lower(rule_name) LIKE ? OR lower(user_agent) LIKE ?)")
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
+	} else if search := strings.TrimSpace(q.Search); search != "" {
+		pattern := "%" + strings.ToLower(search) + "%"
+		clauses = append(clauses, "(lower(client_ip) LIKE ? OR lower(path) LIKE ? OR lower(rule_id) LIKE ? OR lower(rule_name) LIKE ? OR lower(user_agent) LIKE ?)")
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
 	}
 	if q.MinScore != nil {
 		add("score >= ?", *q.MinScore)
@@ -1090,7 +1130,9 @@ func scanWAFAnalyticsEvent(row sqlScanner) (WAFAnalyticsEvent, error) {
 	event.Timestamp = int64(ts)
 	event.StatusCode = int(status)
 	event.AnomalyScore = int(score)
+	event.Score = int(score)
 	applyWAFEventMetadata(&event, metadata)
+	populateWAFEventDerivedFields(&event)
 	return event, nil
 }
 
@@ -1103,6 +1145,11 @@ func applyWAFEventMetadata(event *WAFAnalyticsEvent, raw string) {
 	event.Host = meta["host"]
 	event.QueryString = meta["query_string"]
 	event.City = meta["city"]
+	event.ASN = meta["asn"]
+	event.ASNOrg = meta["asn_org"]
+	event.Upstream = meta["upstream"]
+	event.JA3 = firstNonEmpty(meta["ja3"], meta["tls_ja3"])
+	event.JA4 = firstNonEmpty(meta["ja4"], meta["tls_ja4"])
 	event.RuleIDs = parseStringJSONArray(meta["rule_ids"])
 	event.RuleMessages = parseStringJSONArray(meta["rule_messages"])
 	event.Categories = parseStringJSONArray(meta["categories"])
@@ -1121,6 +1168,63 @@ func applyWAFEventMetadata(event *WAFAnalyticsEvent, raw string) {
 	event.ResponseTruncated = parseBool(meta["response_truncated"])
 	event.ExclusionIDs = parseStringJSONArray(meta["exclusion_ids"])
 	event.ReloadID = meta["reload_id"]
+}
+
+func populateWAFEventDerivedFields(event *WAFAnalyticsEvent) {
+	if event == nil {
+		return
+	}
+	event.Blocked = strings.EqualFold(event.Action, "block") ||
+		strings.EqualFold(event.Action, "deny") ||
+		strings.EqualFold(event.Action, "drop") ||
+		strings.EqualFold(event.Action, "ratelimit") ||
+		strings.EqualFold(event.Action, "rate_limit") ||
+		event.StatusCode == 403 || event.StatusCode == 429
+	if event.Metadata != nil {
+		if event.Host == "" {
+			event.Host = event.Metadata["host"]
+		}
+		if event.QueryString == "" {
+			event.QueryString = event.Metadata["query_string"]
+		}
+		if event.City == "" {
+			event.City = event.Metadata["city"]
+		}
+		if event.ASN == "" {
+			event.ASN = event.Metadata["asn"]
+		}
+		if event.ASNOrg == "" {
+			event.ASNOrg = event.Metadata["asn_org"]
+		}
+		if event.Upstream == "" {
+			event.Upstream = event.Metadata["upstream"]
+		}
+		if event.JA3 == "" {
+			event.JA3 = firstNonEmpty(event.Metadata["ja3"], event.Metadata["tls_ja3"])
+		}
+		if event.JA4 == "" {
+			event.JA4 = firstNonEmpty(event.Metadata["ja4"], event.Metadata["tls_ja4"])
+		}
+	}
+	event.Score = event.AnomalyScore
+	if len(event.Categories) > 0 && event.Categories[0] != "" {
+		event.Category = event.Categories[0]
+	} else if event.Section != "" {
+		event.Category = event.Section
+	} else {
+		event.Category = "waf_core"
+	}
+	if len(event.Severities) > 0 && event.Severities[0] != "" {
+		event.Severity = strings.ToLower(event.Severities[0])
+	} else if event.AnomalyScore >= 15 {
+		event.Severity = "critical"
+	} else if event.AnomalyScore >= 10 {
+		event.Severity = "high"
+	} else if event.AnomalyScore >= 5 || strings.EqualFold(event.Action, "block") {
+		event.Severity = "medium"
+	} else {
+		event.Severity = "low"
+	}
 }
 
 func buildWAFProtectionSummary(summary WAFAnalyticsSummary, breakdowns map[string][]WAFBreakdownItem) WAFProtectionSummary {

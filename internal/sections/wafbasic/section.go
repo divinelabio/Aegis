@@ -24,6 +24,7 @@ import (
 
 	"github.com/divinelabio/aegis/internal/infra/requestctx"
 	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/telemetry"
 	"github.com/divinelabio/aegis/internal/infra/transport"
 	"github.com/divinelabio/aegis/internal/sections"
 	"github.com/google/uuid"
@@ -464,17 +465,25 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 		if config.ResponseInspection {
 			writer := newResponseInspector(w, tx, config.MaxResponseBody)
 			next.ServeHTTP(writer, r)
-			if writer.finalize(r) {
+			if blocked, blockStatus, truncated := writer.finalize(r); blocked {
 				s.blocked.Add(1)
+				tx.ProcessLogging()
+				s.recordWAFEvent(r, tx, "block", blockStatus, true, truncated)
 			} else {
 				s.allowed.Add(1)
+				tx.ProcessLogging()
+				if hasSignificantMatchedRules(tx) {
+					s.recordWAFEvent(r, tx, "detect", writer.status, true, false)
+				}
 			}
-			tx.ProcessLogging()
 			return
 		}
 		s.allowed.Add(1)
 		next.ServeHTTP(w, r)
 		tx.ProcessLogging()
+		if hasSignificantMatchedRules(tx) {
+			s.recordWAFEvent(r, tx, "detect", http.StatusOK, false, false)
+		}
 	})
 }
 
@@ -488,54 +497,248 @@ func (s *Section) block(w http.ResponseWriter, r *http.Request, interruption *co
 		status = http.StatusForbidden
 	}
 	w.Header().Set("X-Aegis-WAF", "blocked")
-
-	clientIP := requestctx.ClientIP(r)
-	if clientIP == "" {
-		clientIP = remoteHost(r.RemoteAddr)
-	}
-	reqID := r.Header.Get("X-Request-Id")
-	if reqID == "" {
-		reqID = uuid.NewString()
-	}
-
-	var ruleIDs []string
-	var ruleMessages []string
-	var severities []string
-	if tx != nil {
-		for _, mr := range tx.MatchedRules() {
-			if mr.Rule() != nil {
-				ruleIDs = append(ruleIDs, strconv.Itoa(mr.Rule().ID()))
-				severities = append(severities, mr.Rule().Severity().String())
-			}
-			if mr.Message() != "" {
-				ruleMessages = append(ruleMessages, mr.Message())
-			}
-		}
-	}
-	ruleIDsJSON, _ := json.Marshal(ruleIDs)
-	ruleMessagesJSON, _ := json.Marshal(ruleMessages)
-	severitiesJSON, _ := json.Marshal(severities)
-
-	storage.LogWAFEvent(storage.WAFEventLog{
-		EventID:      uuid.NewString(),
-		Timestamp:    time.Now().Unix(),
-		IP:           clientIP,
-		Method:       r.Method,
-		Path:         r.URL.Path,
-		QueryString:  r.URL.RawQuery,
-		UserAgent:    r.UserAgent(),
-		Host:         r.Host,
-		StatusCode:   status,
-		Action:       "block",
-		RuleIDs:      string(ruleIDsJSON),
-		RuleMessages: string(ruleMessagesJSON),
-		Severities:   string(severitiesJSON),
-		RequestID:    reqID,
-	})
+	s.recordWAFEvent(r, tx, "block", status, false, false)
 
 	if !transport.WriteConfiguredErrorPage(w, r, status) {
 		http.Error(w, "Forbidden - WAF", status)
 	}
+}
+
+func (s *Section) recordWAFEvent(r *http.Request, tx corazatypes.Transaction, action string, status int, responseInspected, responseTruncated bool) {
+	if r == nil {
+		return
+	}
+	identity, _ := requestctx.FromRequest(r)
+	clientIP := identity.ClientIP
+	if clientIP == "" {
+		clientIP = remoteHost(r.RemoteAddr)
+	}
+	reqID := telemetry.RequestIDFromRequest(r)
+	latencyMs := telemetry.RequestLatencyMs(r)
+
+	var (
+		ruleIDs       []string
+		ruleMessages  []string
+		severities    []string
+		categories    []string
+		matchedFields []string
+		anomalyScore  int
+	)
+	seenCats := map[string]struct{}{}
+	seenFields := map[string]struct{}{}
+
+	if tx != nil {
+		var fallbackIDs, fallbackMsgs, fallbackSevs []string
+		for _, mr := range tx.MatchedRules() {
+			if mr.Rule() == nil {
+				continue
+			}
+			id := mr.Rule().ID()
+			idStr := strconv.Itoa(id)
+			sev := normalizeCorazaSeverity(mr.Rule().Severity().String())
+			msg := strings.TrimSpace(mr.Message())
+
+			if isInternalCRSRule(id) {
+				if msg != "" {
+					fallbackIDs = append(fallbackIDs, idStr)
+					fallbackMsgs = append(fallbackMsgs, msg)
+					fallbackSevs = append(fallbackSevs, sev)
+				}
+				continue
+			}
+			ruleIDs = append(ruleIDs, idStr)
+			severities = append(severities, sev)
+			if msg != "" {
+				ruleMessages = append(ruleMessages, msg)
+			}
+			anomalyScore += severityScorePoints(sev)
+			for _, tag := range mr.Rule().Tags() {
+				if cat := categoryFromCRSTag(tag); cat != "" {
+					if _, exists := seenCats[cat]; !exists {
+						seenCats[cat] = struct{}{}
+						categories = append(categories, cat)
+					}
+				}
+			}
+			for _, md := range mr.MatchedDatas() {
+				vName := strings.TrimSpace(md.Variable().Name())
+				if vName != "" {
+					if _, exists := seenFields[vName]; !exists {
+						seenFields[vName] = struct{}{}
+						matchedFields = append(matchedFields, vName)
+					}
+				}
+			}
+		}
+		if len(ruleIDs) == 0 && len(fallbackIDs) > 0 {
+			ruleIDs = fallbackIDs
+			ruleMessages = fallbackMsgs
+			severities = fallbackSevs
+		}
+	}
+	if responseTruncated && len(ruleIDs) == 0 {
+		ruleIDs = []string{"waf-response-overflow"}
+		ruleMessages = []string{"Response inspection size limit exceeded"}
+		severities = []string{"high"}
+		categories = []string{"protocol"}
+	}
+	if len(categories) == 0 {
+		categories = []string{"waf_core"}
+	}
+	if len(severities) == 0 {
+		if action == "block" {
+			severities = []string{"high"}
+		} else {
+			severities = []string{"medium"}
+		}
+	}
+	if anomalyScore == 0 {
+		if action == "block" {
+			anomalyScore = 5
+		} else {
+			anomalyScore = 3
+		}
+	}
+
+	firstRuleID := ""
+	if len(ruleIDs) > 0 {
+		firstRuleID = ruleIDs[0]
+	}
+	firstRuleMsg := "WAF Rule Match"
+	if len(ruleMessages) > 0 && ruleMessages[0] != "" {
+		firstRuleMsg = ruleMessages[0]
+	}
+
+	telemetry.UpdateRequestLogMetadata(r, telemetry.RequestLogMetadata{
+		Host:     r.Host,
+		RuleID:   firstRuleID,
+		RuleName: firstRuleMsg,
+		RuleType: SectionID,
+		Action:   action,
+		Blocked:  action == "block",
+	})
+
+	ruleIDsJSON, _ := json.Marshal(ruleIDs)
+	ruleMessagesJSON, _ := json.Marshal(ruleMessages)
+	severitiesJSON, _ := json.Marshal(severities)
+	categoriesJSON, _ := json.Marshal(categories)
+	matchedFieldsJSON, _ := json.Marshal(matchedFields)
+
+	storage.LogWAFEvent(storage.WAFEventLog{
+		EventID:           uuid.NewString(),
+		Timestamp:         time.Now().Unix(),
+		IP:                clientIP,
+		Country:           identity.Geo.Country,
+		ASN:               strings.TrimSpace(r.Header.Get("X-Aegis-ASN")),
+		ASNOrg:            strings.TrimSpace(r.Header.Get("X-Aegis-ASN-Org")),
+		JA3:               firstNonEmptyWAF(identity.TLS.JA3, r.Header.Get("X-Aegis-TLS-JA3")),
+		JA4:               firstNonEmptyWAF(identity.TLS.JA4, r.Header.Get("X-Aegis-TLS-JA4")),
+		Method:            r.Method,
+		Path:              r.URL.Path,
+		QueryString:       r.URL.RawQuery,
+		UserAgent:         r.UserAgent(),
+		Host:              r.Host,
+		StatusCode:        status,
+		LatencyMs:         latencyMs,
+		Action:            action,
+		AnomalyScore:      anomalyScore,
+		RuleIDs:           string(ruleIDsJSON),
+		RuleMessages:      string(ruleMessagesJSON),
+		Severities:        string(severitiesJSON),
+		Categories:        string(categoriesJSON),
+		MatchedFields:     string(matchedFieldsJSON),
+		RequestID:         reqID,
+		ResponseInspected: responseInspected,
+		ResponseTruncated: responseTruncated,
+	})
+}
+
+func hasSignificantMatchedRules(tx corazatypes.Transaction) bool {
+	if tx == nil {
+		return false
+	}
+	for _, mr := range tx.MatchedRules() {
+		if mr.Rule() == nil {
+			continue
+		}
+		if !isInternalCRSRule(mr.Rule().ID()) {
+			return true
+		}
+	}
+	return false
+}
+
+func isInternalCRSRule(id int) bool {
+	if id >= 900000 && id < 910000 {
+		return true
+	}
+	switch id {
+	case 949110, 959100, 980130, 980140:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeCorazaSeverity(sev string) string {
+	switch strings.ToLower(strings.TrimSpace(sev)) {
+	case "emergency", "alert", "critical":
+		return "critical"
+	case "error", "high":
+		return "high"
+	case "warning", "medium":
+		return "medium"
+	case "notice", "info", "informational", "debug", "low":
+		return "low"
+	default:
+		return "medium"
+	}
+}
+
+func severityScorePoints(sev string) int {
+	switch sev {
+	case "critical":
+		return 5
+	case "high":
+		return 4
+	case "medium":
+		return 3
+	default:
+		return 2
+	}
+}
+
+func categoryFromCRSTag(tag string) string {
+	t := strings.ToLower(strings.TrimSpace(tag))
+	switch {
+	case strings.Contains(t, "sqli"):
+		return "sqli"
+	case strings.Contains(t, "xss"):
+		return "xss"
+	case strings.Contains(t, "rce"), strings.Contains(t, "command-injection"):
+		return "rce"
+	case strings.Contains(t, "lfi"):
+		return "lfi"
+	case strings.Contains(t, "rfi"):
+		return "rfi"
+	case strings.Contains(t, "traversal"):
+		return "path_traversal"
+	case strings.Contains(t, "scanner"):
+		return "scanner"
+	case strings.Contains(t, "protocol"):
+		return "protocol"
+	default:
+		return ""
+	}
+}
+
+func firstNonEmptyWAF(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 type responseInspector struct {
@@ -566,7 +769,7 @@ func (w *responseInspector) Write(data []byte) (int, error) {
 	}
 	return w.body.Write(data)
 }
-func (w *responseInspector) finalize(r *http.Request) bool {
+func (w *responseInspector) finalize(r *http.Request) (bool, int, bool) {
 	for key, values := range w.Header() {
 		for _, value := range values {
 			w.tx.AddResponseHeader(key, value)
@@ -582,7 +785,7 @@ func (w *responseInspector) finalize(r *http.Request) bool {
 			w.underlying.WriteHeader(status)
 			_, _ = w.underlying.Write([]byte("Forbidden - WAF\n"))
 		}
-		return true
+		return true, status, false
 	}
 	if w.body.Len() > 0 {
 		_, _, _ = w.tx.WriteResponseBody(w.body.Bytes())
@@ -597,17 +800,17 @@ func (w *responseInspector) finalize(r *http.Request) bool {
 			w.underlying.WriteHeader(status)
 			_, _ = w.underlying.Write([]byte("Forbidden - WAF\n"))
 		}
-		return true
+		return true, status, false
 	}
 	if w.overflow {
 		w.Header().Set("X-Aegis-WAF-Inspection", "response-size-exceeded")
 		w.underlying.WriteHeader(http.StatusBadGateway)
 		_, _ = w.underlying.Write([]byte("502 Bad Gateway - Response inspection limit exceeded\n"))
-		return true
+		return true, http.StatusBadGateway, true
 	}
 	w.underlying.WriteHeader(w.status)
 	_, _ = w.underlying.Write(w.body.Bytes())
-	return false
+	return false, w.status, false
 }
 
 func (s *Section) Stats() sections.SectionStats {

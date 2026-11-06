@@ -4,14 +4,16 @@
   "version": "0.1.0",
   "description": "Admin UI tooling for incremental TypeScript migration",
   "scripts": {
-    "admin:build": "node scripts/admin-clean-build-output.mjs && node node_modules/typescript/bin/tsc -p config/tsconfig.admin.json",
-    "admin:typecheck": "node node_modules/typescript/bin/tsc -p config/tsconfig.admin.json --noEmit",
-    "admin:guardrails": "node scripts/admin-guardrails.mjs",
+    "admin:build": "npm --prefix web/admin run build",
+    "admin:typecheck": "npm --prefix web/admin run typecheck",
     "geo:guardrails": "node scripts/geo-identity-guard.mjs",
     "prod:clean:audit": "node scripts/prod-clean-audit.mjs",
-    "admin:verify": "npm run admin:guardrails && npm run geo:guardrails",
+    "admin:verify": "npm run geo:guardrails",
+    "react:build": "npm --prefix web/admin run build",
+    "react:typecheck": "npm --prefix web/admin run typecheck",
+    "react:dev": "npm --prefix web/admin run dev",
     "public:build": "tsc -p config/tsconfig.public.json",
-    "build:all": "npm run admin:build && npm run public:build"
+    "build:all": "npm run react:build && npm run public:build"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

@@ -2,22 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	"github.com/divinelabio/aegis/internal/buildinfo"
+	"github.com/divinelabio/aegis/internal/licensing"
 	"github.com/divinelabio/aegis/internal/maintenance"
 )
 
 var (
-	Version               = "1.0.1"
+	Version               = "dev"
 	BuildDate             = "unknown"
-	ArtifactRootPublicKey = buildinfo.RootPublicKey
-	ArtifactSignedKeySet  = buildinfo.SignedKeySet
-	ArtifactIssuer        = buildinfo.LicenseIssuer
+	ArtifactRootPublicKey = ""
+	ArtifactSignedKeySet  = ""
+	ArtifactIssuer        = "https://license.aegis.invalid"
 	ArtifactAudience      = "aegis-updater"
 )
 
@@ -27,10 +29,6 @@ func main() {
 		os.Exit(2)
 	}
 	command := os.Args[1]
-	if command == "version" {
-		fmt.Printf("aegis-updater %s (%s)\n", Version, BuildDate)
-		return
-	}
 	flags := flag.NewFlagSet(command, flag.ExitOnError)
 	configPath := flags.String("config", "config.yaml", "path to Aegis configuration")
 	manifestPath := flags.String("manifest-file", "", "signed artifact manifest file")
@@ -44,9 +42,16 @@ func main() {
 	defer cancel()
 	switch command {
 	case "serve":
-		// Validate signer certificates for every upgrade, allowing status and
-		// rollback to remain available if the embedded signer has expired.
-		daemon := maintenance.ReleaseDaemon{Config: cfg.Updater, Version: Version, Verifier: maintenance.ManifestVerifier{Issuer: ArtifactIssuer, Audience: ArtifactAudience, RootPublicKey: ArtifactRootPublicKey, SignedKeySet: ArtifactSignedKeySet}}
+		var keys map[string]ed25519.PublicKey
+		if ArtifactRootPublicKey != "" {
+			var keyErr error
+			keys, keyErr = licensing.CertifiedTrustedKeys(ArtifactRootPublicKey, ArtifactSignedKeySet, licensing.KeyPurposeArtifact, time.Now().UTC())
+			if keyErr != nil {
+				err = keyErr
+				break
+			}
+		}
+		daemon := maintenance.ReleaseDaemon{Config: cfg.Updater, Version: Version, Verifier: maintenance.ManifestVerifier{Issuer: ArtifactIssuer, Audience: ArtifactAudience, Keys: keys}}
 		err = daemon.Serve(ctx)
 	case "status":
 		var response maintenance.UpdaterResponse

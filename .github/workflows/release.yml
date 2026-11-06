@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag (for example v1.0.3); never a branch'
+        description: 'Existing release tag (for example v1.1.0); never a branch'
         required: true
         type: string
 
@@ -46,20 +46,26 @@ jobs:
           fi
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
           check-latest: true
 
-      - name: Verify release source
-        run: go test ./...
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Build admin UI from release source
         run: |
+          cd web/admin
           npm ci
-          npm run admin:build
+          npm run build
+          cd ../..
+
+      - name: Verify release source
+        run: go test ./...
 
       - name: Set up image emulation
         uses: docker/setup-qemu-action@v3
@@ -84,7 +90,7 @@ jobs:
             fi
           }
 
-          LDFLAGS="-s -w -X main.Version=$RELEASE_VERSION -X main.BuildDate=$BUILD_DATE"
+          LDFLAGS="-s -w -X main.Version=$RELEASE_VERSION -X main.BuildDate=$BUILD_DATE -X github.com/divinelabio/aegis/internal/core/admin.Version=$RELEASE_VERSION -X github.com/divinelabio/aegis/internal/core/admin.BuildDate=$BUILD_DATE"
 
           # 1. Linux amd64
           echo "Building Linux amd64..."
@@ -144,6 +150,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          name: Aegis Community Edition ${{ env.RELEASE_TAG }}
           overwrite_files: true
           prerelease: ${{ env.RELEASE_PRERELEASE == 'true' }}
           make_latest: ${{ env.RELEASE_PRERELEASE == 'true' && 'false' || 'legacy' }}

@@ -95,42 +95,89 @@ func (h *Handler) HandlePipelineStats(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	window := r.URL.Query().Get("window")
+	window := strings.TrimSpace(r.URL.Query().Get("window"))
 	if window == "" {
-		window = "1h"
+		window = "24h"
 	}
-	typeFilter := r.URL.Query().Get("type")
-	limitStr := r.URL.Query().Get("limit")
-	limit := 100
+	typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
+	limitStr := strings.TrimSpace(r.URL.Query().Get("limit"))
+	limit := 250
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
 		limit = l
 	}
 
+	sectionParam := strings.TrimSpace(r.URL.Query().Get("section"))
 	query := storage.WAFAnalyticsQuery{
-		Window: window,
-		Limit:  limit,
+		Window:  window,
+		Limit:   limit,
+		Section: sectionParam,
+		Sections: []string{
+			"waf_core",
+			"bot_protection",
+			"traffic_control",
+			"access_control",
+			"api_security",
+			"http_security",
+			"security_rules",
+		},
+	}
+
+	actionParam := strings.TrimSpace(r.URL.Query().Get("action"))
+	if actionParam != "" && !strings.EqualFold(actionParam, "all") {
+		if strings.EqualFold(actionParam, "allowed") {
+			query.Action = "allow,detect"
+		} else {
+			query.Action = actionParam
+		}
 	}
 
 	if strings.EqualFold(typeFilter, "blocked") {
 		query.Action = "block"
 	} else if strings.EqualFold(typeFilter, "allowed") {
-		query.Action = "allow"
+		query.Action = "allow,detect"
 	}
 
-	if ip := r.URL.Query().Get("ip"); ip != "" {
+	if sev := strings.TrimSpace(r.URL.Query().Get("severity")); sev != "" && !strings.EqualFold(sev, "all") {
+		query.Severity = sev
+	}
+	if cat := strings.TrimSpace(r.URL.Query().Get("category")); cat != "" && !strings.EqualFold(cat, "all") {
+		query.Category = cat
+	}
+	if method := strings.TrimSpace(r.URL.Query().Get("method")); method != "" && !strings.EqualFold(method, "all") {
+		query.Method = method
+	}
+	if status := strings.TrimSpace(r.URL.Query().Get("status")); status != "" && !strings.EqualFold(status, "all") {
+		query.Status = status
+	}
+	if ua := strings.TrimSpace(r.URL.Query().Get("user_agent")); ua != "" {
+		query.UserAgent = ua
+	}
+	searchQuery := strings.TrimSpace(r.URL.Query().Get("q"))
+	if searchQuery == "" {
+		searchQuery = strings.TrimSpace(r.URL.Query().Get("search"))
+	}
+	if searchQuery != "" {
+		query.Q = searchQuery
+		query.Search = searchQuery
+	}
+
+	if ip := strings.TrimSpace(r.URL.Query().Get("ip")); ip != "" {
 		query.IP = ip
 	}
-	if path := r.URL.Query().Get("path"); path != "" {
+	if path := strings.TrimSpace(r.URL.Query().Get("path")); path != "" {
 		query.Path = path
 	}
-	if rule := r.URL.Query().Get("rule"); rule != "" {
+	if rule := strings.TrimSpace(r.URL.Query().Get("rule")); rule != "" {
 		query.RuleID = rule
 	}
-	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
+	if ruleID := strings.TrimSpace(r.URL.Query().Get("rule_id")); ruleID != "" {
+		query.RuleID = ruleID
+	}
+	if cursor := strings.TrimSpace(r.URL.Query().Get("cursor")); cursor != "" {
 		query.Cursor = cursor
 	}
 
-	page, err := storage.GetWAFAnalyticsEvents(query)
+	page, err := storage.GetSecurityAnalyticsEvents(query)
 	if err != nil || len(page.Events) == 0 {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"logs":        []interface{}{},
@@ -143,19 +190,33 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 
 	logs := make([]map[string]interface{}, 0, len(page.Events))
 	for _, ev := range page.Events {
-		isBlocked := strings.EqualFold(ev.Action, "block") || strings.EqualFold(ev.Action, "deny") || strings.EqualFold(ev.Action, "drop")
-		severity := "medium"
-		if len(ev.Severities) > 0 && ev.Severities[0] != "" {
-			severity = strings.ToLower(ev.Severities[0])
-		} else if ev.AnomalyScore >= 15 {
-			severity = "critical"
-		} else if ev.AnomalyScore >= 5 {
-			severity = "high"
+		isBlocked := strings.EqualFold(ev.Action, "block") ||
+			strings.EqualFold(ev.Action, "deny") ||
+			strings.EqualFold(ev.Action, "drop") ||
+			strings.EqualFold(ev.Action, "ratelimit") ||
+			strings.EqualFold(ev.Action, "rate_limit")
+		severity := ev.Severity
+		if severity == "" {
+			if len(ev.Severities) > 0 && ev.Severities[0] != "" {
+				severity = strings.ToLower(ev.Severities[0])
+			} else if ev.AnomalyScore >= 15 {
+				severity = "critical"
+			} else if ev.AnomalyScore >= 5 {
+				severity = "high"
+			} else {
+				severity = "medium"
+			}
 		}
 
-		category := "WAF Core"
-		if len(ev.Categories) > 0 && ev.Categories[0] != "" {
-			category = ev.Categories[0]
+		category := ev.Category
+		if category == "" {
+			if len(ev.Categories) > 0 && ev.Categories[0] != "" {
+				category = ev.Categories[0]
+			} else if ev.Section != "" {
+				category = ev.Section
+			} else {
+				category = "WAF Core"
+			}
 		}
 
 		ruleName := ev.RuleName
@@ -166,11 +227,22 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 			ruleName = "Security Policy Violation"
 		}
 
+		metadata := ev.Metadata
+		if metadata == nil {
+			metadata = make(map[string]string)
+		}
+		id := ev.ID
+		if id == "" {
+			id = ev.RequestID
+		}
+
 		logs = append(logs, map[string]interface{}{
-			"id":                ev.ID,
+			"id":                id,
 			"ts":                ev.Timestamp,
 			"timestamp":         ev.Timestamp,
+			"section":           ev.Section,
 			"ip":                ev.ClientIP,
+			"client_ip":         ev.ClientIP,
 			"country":           ev.Country,
 			"city":              ev.City,
 			"method":            ev.Method,
@@ -181,6 +253,7 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 			"action":            ev.Action,
 			"blocked":           isBlocked,
 			"rule":              ruleName,
+			"rule_name":         ruleName,
 			"rule_id":           ev.RuleID,
 			"rule_messages":     ev.RuleMessages,
 			"severities":        ev.Severities,
@@ -188,12 +261,13 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 			"category":          category,
 			"categories":        ev.Categories,
 			"score":             ev.AnomalyScore,
+			"anomaly_score":     ev.AnomalyScore,
 			"latency_ms":        ev.LatencyMs,
 			"request_id":        ev.RequestID,
 			"user_agent":        ev.UserAgent,
 			"user_agent_family": ev.UserAgentFamily,
 			"matched_fields":    ev.MatchedFields,
-			"metadata":          ev.Metadata,
+			"metadata":          metadata,
 		})
 	}
 

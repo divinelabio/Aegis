@@ -1,1 +1,0 @@
-type QueryRoot = Document | Element;

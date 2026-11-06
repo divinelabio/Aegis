@@ -59,6 +59,7 @@ type SecurityRule struct {
 }
 
 type RequestContext struct {
+	RequestID    string            `json:"request_id,omitempty"`
 	ClientIP     string            `json:"client_ip"`
 	Host         string            `json:"host"`
 	Path         string            `json:"path"`
@@ -126,6 +127,7 @@ func NewRequestContext(r *http.Request) RequestContext {
 	}
 
 	return RequestContext{
+		RequestID:  firstNonEmpty(r.Header.Get("X-Request-Id"), r.Header.Get("X-Request-ID")),
 		ClientIP:   ip,
 		Host:       r.Host,
 		Path:       r.URL.Path,

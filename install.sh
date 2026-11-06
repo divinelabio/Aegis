@@ -2,9 +2,9 @@
 # ==============================================================================
 #  Aegis Web Application Firewall — Unified Universal Installer
 #  Usage:
-#    curl -fsSL https://get.divinelab.io/installAegis.sh | sudo bash
-#    or:
-#    git clone https://github.com/divinelabio/aegis.git && cd aegis && sudo bash install.sh [OPTIONS]
+#    git clone https://github.com/divinelabio/aegis.git
+#    cd aegis
+#    sudo bash install.sh [OPTIONS]
 # ==============================================================================
 
 set -euo pipefail
@@ -38,11 +38,13 @@ ADMIN_PASSWORD="${AEGIS_ADMIN_PASSWORD:-}"
 POSTGRES_HOST="${AEGIS_CONTROL_DB_HOST:-127.0.0.1}"
 POSTGRES_PORT="${AEGIS_CONTROL_DB_PORT:-5432}"
 POSTGRES_USER="${AEGIS_CONTROL_DB_USER:-aegis}"
-POSTGRES_DB="${AEGIS_CONTROL_DB_NAME:-aegis}"
+POSTGRES_DB="${AEGIS_CONTROL_DB_NAME:-aegis_control}"
 POSTGRES_PASSWORD="${AEGIS_CONTROL_DB_PASSWORD:-}"
 
-# ClickHouse real-time analytics database (enabled by default)
-CLICKHOUSE_ENABLED="${AEGIS_CLICKHOUSE_ENABLED:-true}"
+ANALYTICS_DRIVER="${AEGIS_ANALYTICS_DRIVER:-postgresql}"
+ANALYTICS_MODE="${AEGIS_ANALYTICS_MODE:-optional}"
+ANALYTICS_RETENTION_DAYS="${AEGIS_ANALYTICS_RETENTION_DAYS:-30}"
+CLICKHOUSE_ENABLED="${AEGIS_CLICKHOUSE_ENABLED:-false}"
 CLICKHOUSE_HOST="${AEGIS_ANALYTICS_DB_HOST:-127.0.0.1}"
 CLICKHOUSE_PORT="${AEGIS_ANALYTICS_DB_PORT:-9000}"
 CLICKHOUSE_USER="${AEGIS_ANALYTICS_DB_USER:-default}"
@@ -62,12 +64,11 @@ NON_INTERACTIVE=false
 log_banner() {
     echo -e "${CYAN}${BOLD}"
     cat << "EOF"
- █████  ███████  ██████  ██ ███████ 
-██   ██ ██      ██       ██ ██      
-███████ █████   ██   ███ ██ ███████ 
-██   ██ ██      ██    ██ ██      ██ 
-██   ██ ███████  ██████  ██ ███████ 
-
+    ___    ______ _____ _____ _____ 
+   /   |  / ____// ___// ___// ___/ 
+  / /| | / __/  / (_ // __/  \__ \  
+ / ___ |/ /___  \__ // /___ ___/ /  
+/_/  |_/_____/ /___//_____//____/   
    High-Performance Web Application Firewall & Reverse Proxy
 EOF
     echo -e "${RESET}"
@@ -202,29 +203,6 @@ detect_environment() {
     done
 }
 
-print_docker_install_instructions() {
-    echo -e "${CYAN}${BOLD}Please install Docker and Docker Compose first, then re-run this script:${RESET}"
-    echo ""
-    if command -v apt-get >/dev/null 2>&1; then
-        echo -e "  ${YELLOW}sudo apt update && sudo apt install -y docker.io docker-compose-plugin${RESET}"
-        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
-    elif command -v dnf >/dev/null 2>&1; then
-        echo -e "  ${YELLOW}sudo dnf install -y docker docker-compose-plugin${RESET}"
-        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
-    elif command -v yum >/dev/null 2>&1; then
-        echo -e "  ${YELLOW}sudo yum install -y docker${RESET}"
-        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
-    elif command -v pacman >/dev/null 2>&1; then
-        echo -e "  ${YELLOW}sudo pacman -S docker docker-compose${RESET}"
-        echo -e "  ${YELLOW}sudo systemctl enable --now docker${RESET}"
-    else
-        echo -e "  ${YELLOW}Please install Docker Engine and Docker Compose using your system's package manager.${RESET}"
-    fi
-    echo ""
-    echo -e "${DIM}Tip: You can re-run this installer and choose Option 2 to install Aegis directly without Docker.${RESET}"
-    echo ""
-}
-
 # ------------------------------------------------------------------------------
 # Choice: Deployment Method (Docker vs Direct Binary)
 # ------------------------------------------------------------------------------
@@ -235,13 +213,6 @@ resolve_deploy_method() {
     fi
 
     if [[ -n "$DEPLOY_METHOD" ]]; then
-        if [[ "$DEPLOY_METHOD" == "docker" ]] && ! $docker_available; then
-            echo ""
-            log_error "Docker deployment was selected, but Docker is not installed on this system."
-            echo ""
-            print_docker_install_instructions
-            exit 1
-        fi
         return 0
     fi
 
@@ -262,25 +233,30 @@ resolve_deploy_method() {
         echo ""
         echo "Please select a deployment method:"
         echo ""
-        echo -e "  ${BOLD}[1] Docker Container Stack${RESET}"
-        echo -e "      ${DIM}Requires Docker Engine & Docker Compose to be installed on this host.${RESET}"
+        echo -e "  ${BOLD}[1] Install Docker automatically and deploy Aegis (Recommended)${RESET}"
+        echo -e "      ${DIM}Installs official Docker engine & Compose, then boots the isolated stack.${RESET}"
         echo ""
-        echo -e "  ${BOLD}[2] Install Aegis directly as a native systemd service (Direct Binary - Recommended)${RESET}"
+        echo -e "  ${BOLD}[2] Install Aegis directly as a native systemd service (Direct Binary)${RESET}"
         echo -e "      ${DIM}Lightweight bare-metal installation. No containers, zero virtualization overhead.${RESET}"
         echo ""
         echo -e "  ${BOLD}[3] Cancel installation${RESET}"
         echo ""
 
-        read -rp "Enter choice [1-3] (Default: 2): " choice </dev/tty || choice="2"
-        choice="${choice:-2}"
+        read -rp "Enter choice [1-3] (Default: 1): " choice </dev/tty || choice="1"
+        choice="${choice:-1}"
 
         case "$choice" in
             1)
-                echo ""
-                log_error "Docker is not installed on this system."
-                echo ""
-                print_docker_install_instructions
-                exit 1
+                if ask_user_permission "Proceed with installing Docker Engine from get.docker.com on this system?" "Y"; then
+                    log_step "Installing Docker engine..."
+                    curl -fsSL https://get.docker.com | sh
+                    systemctl enable --now docker
+                    DEPLOY_METHOD="docker"
+                    log_success "Docker installed and activated."
+                else
+                    log_warn "Docker installation declined. Falling back to direct binary."
+                    DEPLOY_METHOD="direct"
+                fi
                 ;;
             2)
                 DEPLOY_METHOD="direct"
@@ -313,7 +289,7 @@ resolve_install_mode() {
     echo ""
     echo -e "  ${BOLD}[1] Express Setup (Recommended)${RESET}"
     echo -e "      ${DIM}- Automatically generates strong cryptographically random credentials${RESET}"
-    echo -e "      ${DIM}- Prompts before installing any missing system services (Postgres/ClickHouse)${RESET}"
+    echo -e "      ${DIM}- Uses PostgreSQL for both Control Plane and Traffic Analytics (30-day retention)${RESET}"
     echo -e "      ${DIM}- Fast zero-touch config; prints full credentials summary at completion${RESET}"
     echo ""
     echo -e "  ${BOLD}[2] Guided / Custom Setup${RESET}"
@@ -348,9 +324,6 @@ resolve_direct_databases() {
     fi
 
     if $pg_detected; then
-        if command -v systemctl >/dev/null 2>&1; then
-            systemctl enable --now postgresql 2>/dev/null || systemctl start postgresql 2>/dev/null || true
-        fi
         log_success "PostgreSQL service detected on localhost:5432."
     else
         echo ""
@@ -393,57 +366,68 @@ resolve_direct_databases() {
         fi
     fi
 
-    # 2. ClickHouse (Analytics Store)
-    if [[ "$CLICKHOUSE_ENABLED" == "false" ]]; then
-        log_info "ClickHouse analytics disabled. Running in Core WAF Mode."
-    else
-        local ch_detected=false
-        if command -v clickhouse-client >/dev/null 2>&1 || check_port_in_use 9000; then
-            ch_detected=true
-        fi
-
-        if $ch_detected; then
-            log_success "ClickHouse service detected on localhost:9000."
-        else
-            echo ""
-            echo -e "${CYAN}${BOLD}[INFO] ClickHouse provides high-performance real-time telemetry and WAF attack analytics.${RESET}"
-            
-            if [[ "$INSTALL_MODE" == "express" ]]; then
-                if ask_user_permission "Would you like the installer to install and configure ClickHouse locally on this machine?" "Y"; then
-                    install_clickhouse_local
-                    CLICKHOUSE_ENABLED=true
-                else
-                    log_info "ClickHouse skipped by user choice. Running in Core WAF Mode (analytics disabled)."
-                    CLICKHOUSE_ENABLED=false
-                fi
-            else
-                echo "How would you like to configure ClickHouse analytics?"
-                echo -e "  ${BOLD}[1] Install and configure ClickHouse locally on this machine (Recommended)${RESET}"
-                echo "  [2] Connect to an existing external ClickHouse database"
-                echo "  [3] Disable ClickHouse (Run in lightweight Core WAF Mode without analytics)"
-                read -rp "Enter choice [1-3] (Default: 1): " ch_choice </dev/tty || ch_choice="1"
-                ch_choice="${ch_choice:-1}"
-
-                case "$ch_choice" in
-                    1)
-                        install_clickhouse_local
-                        CLICKHOUSE_ENABLED=true
-                        ;;
-                    2)
-                        read -rp "  ClickHouse Host [$CLICKHOUSE_HOST]: " input_chhost </dev/tty; CLICKHOUSE_HOST="${input_chhost:-$CLICKHOUSE_HOST}"
-                        read -rp "  ClickHouse Port [$CLICKHOUSE_PORT]: " input_chport </dev/tty; CLICKHOUSE_PORT="${input_chport:-$CLICKHOUSE_PORT}"
-                        read -rp "  ClickHouse Database [$CLICKHOUSE_DB]: " input_chdb </dev/tty; CLICKHOUSE_DB="${input_chdb:-$CLICKHOUSE_DB}"
-                        read -rp "  ClickHouse Username [$CLICKHOUSE_USER]: " input_chuser </dev/tty; CLICKHOUSE_USER="${input_chuser:-$CLICKHOUSE_USER}"
-                        read -rp "  ClickHouse Password: " input_chpass </dev/tty; CLICKHOUSE_PASSWORD="$input_chpass"
-                        CLICKHOUSE_ENABLED=true
-                        ;;
-                    *)
-                        log_info "ClickHouse disabled. Running in Core WAF mode."
-                        CLICKHOUSE_ENABLED=false
-                        ;;
-                esac
+    # 2. Analytics Store (PostgreSQL default, ClickHouse optional)
+    if [[ "$INSTALL_MODE" == "express" ]]; then
+        if [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then
+            local ch_detected=false
+            if command -v clickhouse-client >/dev/null 2>&1 || check_port_in_use 9000; then
+                ch_detected=true
             fi
+            if $ch_detected; then
+                log_success "ClickHouse service detected on localhost:9000."
+                ANALYTICS_DRIVER="clickhouse"
+            elif ask_user_permission "Would you like the installer to install ClickHouse locally on this machine?" "N"; then
+                install_clickhouse_local
+                ANALYTICS_DRIVER="clickhouse"
+            else
+                log_info "Using PostgreSQL for Traffic Analytics (${ANALYTICS_RETENTION_DAYS}-day retention)."
+                CLICKHOUSE_ENABLED=false
+                ANALYTICS_DRIVER="postgresql"
+            fi
+        else
+            CLICKHOUSE_ENABLED=false
+            ANALYTICS_DRIVER="postgresql"
+            log_success "Analytics configured to use PostgreSQL (${ANALYTICS_RETENTION_DAYS}-day retention, shared with Control DB)."
         fi
+    else
+        echo ""
+        echo "How would you like to configure Traffic Analytics?"
+        echo "  [1] Use PostgreSQL for Analytics (Recommended — ${ANALYTICS_RETENTION_DAYS}-day retention, no extra service required)"
+        echo "  [2] Install and configure ClickHouse locally on this machine (Optional)"
+        echo "  [3] Connect to an existing external ClickHouse database (Optional)"
+        echo "  [4] Disable Analytics (Run Aegis in core WAF mode without analytics)"
+        read -rp "Enter choice [1-4] (Default: 1): " ch_choice </dev/tty || ch_choice="1"
+        ch_choice="${ch_choice:-1}"
+
+        case "$ch_choice" in
+            1)
+                CLICKHOUSE_ENABLED=false
+                ANALYTICS_DRIVER="postgresql"
+                ANALYTICS_MODE="optional"
+                log_success "Analytics configured to use PostgreSQL (${ANALYTICS_RETENTION_DAYS}-day retention)."
+                ;;
+            2)
+                install_clickhouse_local
+                ANALYTICS_DRIVER="clickhouse"
+                ANALYTICS_MODE="optional"
+                ;;
+            3)
+                read -rp "  ClickHouse Host [$CLICKHOUSE_HOST]: " input_chhost </dev/tty; CLICKHOUSE_HOST="${input_chhost:-$CLICKHOUSE_HOST}"
+                read -rp "  ClickHouse Port [$CLICKHOUSE_PORT]: " input_chport </dev/tty; CLICKHOUSE_PORT="${input_chport:-$CLICKHOUSE_PORT}"
+                read -rp "  ClickHouse Database [$CLICKHOUSE_DB]: " input_chdb </dev/tty; CLICKHOUSE_DB="${input_chdb:-$CLICKHOUSE_DB}"
+                read -rp "  ClickHouse Username [$CLICKHOUSE_USER]: " input_chuser </dev/tty; CLICKHOUSE_USER="${input_chuser:-$CLICKHOUSE_USER}"
+                read -rp "  ClickHouse Password: " input_chpass </dev/tty; CLICKHOUSE_PASSWORD="$input_chpass"
+                CLICKHOUSE_ENABLED=true
+                ANALYTICS_DRIVER="clickhouse"
+                ANALYTICS_MODE="optional"
+                ;;
+            *)
+                log_info "Analytics disabled."
+                CLICKHOUSE_ENABLED=false
+                ANALYTICS_DRIVER="postgresql"
+                ANALYTICS_MODE="disabled"
+                ;;
+        esac
     fi
 }
 
@@ -575,7 +559,9 @@ configure_parameters() {
     # Generate common secrets if empty
     ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(generate_password 16)}"
     POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generate_password 24)}"
-    CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-$(generate_password 24)}"
+    if [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then
+        CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-$(generate_password 24)}"
+    fi
     JWT_SECRET="${JWT_SECRET:-$(generate_password 32)}"
 
     if [[ "$INSTALL_MODE" == "express" ]]; then
@@ -669,31 +655,23 @@ configure_parameters() {
 # Deployment: Docker Compose
 # ------------------------------------------------------------------------------
 deploy_docker_stack() {
-	getent group aegis >/dev/null || groupadd --system aegis
     log_step "Deploying Aegis stack via Docker Compose..."
     mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
-    # Release containers run as the fixed, unprivileged Aegis identity.
-    chown -R 65532:65532 "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
-    if [[ -d "./data/rules" ]]; then
-        cp -r "./data/rules" "${INSTALL_DIR}/data/" 2>/dev/null || true
-    fi
     cd "${INSTALL_DIR}"
 
-    # Write docker-compose.yml
-    cat << 'COMPOSE_EOF' > docker-compose.yml
+    if [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then
+        ANALYTICS_DRIVER="clickhouse"
+        cat << 'COMPOSE_EOF' > docker-compose.yml
 version: '3.8'
 
 services:
   aegis:
-    image: ${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis:latest}
+    image: ${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis}:${AEGIS_VERSION:-latest}
     container_name: aegis
-    hostname: aegis
     restart: unless-stopped
     ports:
       - "${SERVER_PORT:-8080}:8080"
       - "${SERVER_ADMIN_PORT:-8081}:8081"
-    group_add:
-      - "${AEGIS_UPDATER_GID}"
     environment:
       - AEGIS_ADMIN_PASSWORD=${AEGIS_ADMIN_PASSWORD}
       - AEGIS_CONTROL_DB_PASSWORD=${AEGIS_CONTROL_DB_PASSWORD}
@@ -704,10 +682,7 @@ services:
     volumes:
       - ./config.yaml:/var/lib/aegis/config.yaml:ro
       - ./data:/var/lib/aegis/data
-      - ./data/rules:/var/lib/aegis/data/rules:ro
       - ./logs:/var/lib/aegis/logs
-      - /run/aegis:/run/aegis
-      - /etc/machine-id:/etc/aegis/host-machine-id:ro
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -721,13 +696,13 @@ services:
     container_name: aegis_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${AEGIS_CONTROL_DB_NAME:-aegis}
+      POSTGRES_DB: aegis_control
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: ${AEGIS_CONTROL_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aegis -d ${AEGIS_CONTROL_DB_NAME:-aegis}"]
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis_control"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -765,38 +740,94 @@ volumes:
   clickhouse_data:
   redis_data:
 COMPOSE_EOF
+    else
+        ANALYTICS_DRIVER="postgresql"
+        cat << 'COMPOSE_EOF' > docker-compose.yml
+version: '3.8'
+
+services:
+  aegis:
+    image: ${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis}:${AEGIS_VERSION:-latest}
+    container_name: aegis
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+      - "${SERVER_ADMIN_PORT:-8081}:8081"
+    environment:
+      - AEGIS_ADMIN_PASSWORD=${AEGIS_ADMIN_PASSWORD}
+      - AEGIS_CONTROL_DB_PASSWORD=${AEGIS_CONTROL_DB_PASSWORD}
+      - AEGIS_JWT_SECRET=${AEGIS_JWT_SECRET}
+      - AEGIS_DEV_MODE=${AEGIS_DEV_MODE:-enterprise}
+      - AEGIS_LICENSE_KEY=${AEGIS_LICENSE_KEY:-}
+    volumes:
+      - ./config.yaml:/var/lib/aegis/config.yaml:ro
+      - ./data:/var/lib/aegis/data
+      - ./logs:/var/lib/aegis/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: aegis_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aegis_control
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: ${AEGIS_CONTROL_DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis_control"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: aegis_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+COMPOSE_EOF
+    fi
 
     # Write .env file
     cat << ENV_EOF > .env
 SERVER_PORT=${PROXY_PORT}
 SERVER_ADMIN_PORT=${ADMIN_PORT}
-AEGIS_IMAGE=${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis:${AEGIS_VERSION:-latest}}
+AEGIS_IMAGE=${AEGIS_IMAGE:-ghcr.io/divinelabio/aegis}
 AEGIS_VERSION=${AEGIS_VERSION:-latest}
 AEGIS_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 AEGIS_CONTROL_DB_PASSWORD=${POSTGRES_PASSWORD}
-AEGIS_CONTROL_DB_NAME=${POSTGRES_DB}
 AEGIS_ANALYTICS_DB_PASSWORD=${CLICKHOUSE_PASSWORD}
 AEGIS_JWT_SECRET=${JWT_SECRET}
 AEGIS_DEV_MODE=enterprise
 AEGIS_LICENSE_KEY=${LICENSE_KEY}
-AEGIS_UPDATER_GID=$(getent group aegis | cut -d: -f3)
 ENV_EOF
     chmod 600 .env
 
     # Write minimal config.yaml
-    cat << CONFIG_EOF > config.yaml
+    if [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then
+        cat << CONFIG_EOF > config.yaml
 server:
   port: 8080
   admin:
     host: "0.0.0.0"
     port: 8081
-    username: "${ADMIN_USER}"
     setup_completed: true
-    secure_cookies: false
-
-updater:
-  socket_path: /run/aegis/updater.sock
-  mode: docker
+    secure_cookies: true
 
 storage:
   control:
@@ -804,194 +835,72 @@ storage:
     driver: postgresql
     host: postgres
     port: 5432
-    database: ${POSTGRES_DB}
+    database: aegis_control
     username: aegis
     password_secret_ref: env:AEGIS_CONTROL_DB_PASSWORD
     ssl_mode: disable
   analytics:
     enabled: true
-    mode: optional
+    mode: ${ANALYTICS_MODE}
+    driver: clickhouse
     host: clickhouse
     port: 9000
     database: aegis
     username: default
     password_secret_ref: env:AEGIS_ANALYTICS_DB_PASSWORD
     secure: false
+    retention_days: ${ANALYTICS_RETENTION_DAYS}
 
 upstream:
   target: ${UPSTREAM_URL}
-
-sections:
-  waf_core:
-    enabled: true
-    mode: blocking
-    protection_level: 3
-    engine:
-      enable_crs: true
-      anomaly_threshold: 5
-      paranoia_level: 1
-      crs_path: data/rules/crs
-      crs_setup_path: data/rules/crs-setup.conf
-
-  http_security:
-    enabled: true
-    protection_level: 3
-    security_headers:
-      enabled: true
-      hsts: "max-age=31536000; includeSubDomains"
-      x_frame_options: "DENY"
-      x_content_type_options: "nosniff"
-    upload_limit:
-      enabled: true
-      max_body_size: "10MB"
-    method_enforcer:
-      enabled: true
-      mode: "blocklist"
-      blocked_methods:
-        - TRACE
-        - TRACK
-        - CONNECT
-        - DEBUG
-
-  traffic_control:
-    enabled: true
-    protection_level: 3
-    rate_limit:
-      enabled: true
-      default_rate: 60
-      default_burst: 10
-      window: "1m"
-      key_by: "ip"
-    blacklist:
-      enabled: true
 CONFIG_EOF
+    else
+        cat << CONFIG_EOF > config.yaml
+server:
+  port: 8080
+  admin:
+    host: "0.0.0.0"
+    port: 8081
+    setup_completed: true
+    secure_cookies: true
+
+storage:
+  control:
+    enabled: true
+    driver: postgresql
+    host: postgres
+    port: 5432
+    database: aegis_control
+    username: aegis
+    password_secret_ref: env:AEGIS_CONTROL_DB_PASSWORD
+    ssl_mode: disable
+  analytics:
+    enabled: false
+    mode: ${ANALYTICS_MODE}
+    driver: postgresql
+    retention_days: ${ANALYTICS_RETENTION_DAYS}
+
+upstream:
+  target: ${UPSTREAM_URL}
+CONFIG_EOF
+    fi
 
     log_info "Pulling container images and launching services..."
-    install_docker_updater
-    local docker_archive docker_image
-    docker_archive="$(mktemp)"
-    download_community_archive "aegis-docker-linux-${ARCH}.tar.gz" "$docker_archive"
-    docker load --input "$docker_archive" || fatal "Could not load the Community Docker release."
-    rm -f "$docker_archive"
-    local docker_version="${AEGIS_VERSION#v}"
-    [[ "$docker_version" != "latest" ]] || docker_version="1.0.2"
-    docker_image="$(docker image inspect "aegis-community:${docker_version}-${ARCH}" --format '{{.Id}}')" || fatal "Community Docker image is missing."
-    [[ "$docker_image" =~ ^sha256:[a-f0-9]{64}$ ]] || fatal "Invalid Community Docker image identity."
-    printf '\nAEGIS_IMAGE=%s\n' "$docker_image" >> .env
-    cp .env release.env
-    chmod 600 release.env
-    docker compose --env-file release.env pull --quiet postgres clickhouse
-    docker compose --env-file release.env up -d
+    docker compose pull --quiet
+    docker compose up -d
 
     log_info "Waiting for services to become healthy..."
     local attempts=0
     local max_attempts=30
     while [[ $attempts -lt $max_attempts ]]; do
-        if curl --fail --silent "http://127.0.0.1:${PROXY_PORT}/health/ready" >/dev/null; then
+        if (curl -s "http://127.0.0.1:${ADMIN_PORT}/" >/dev/null 2>&1) || (docker compose ps aegis 2>/dev/null | grep -q "Up"); then
             break
         fi
         sleep 2
         attempts=$((attempts + 1))
     done
-	[[ $attempts -lt $max_attempts ]] || fatal "Docker services did not become ready. Check docker compose --env-file release.env logs."
 
     log_success "Docker stack deployed and operational."
-}
-
-# The host updater owns Docker operations; the application receives only its
-# restricted socket. Docker's administrative socket is never mounted in Aegis.
-community_release_base() {
-    local release_version="${AEGIS_VERSION#v}"
-    [[ "$release_version" != "latest" ]] || fatal "Resolve the release version before downloading components."
-    if [[ -n "${AEGIS_DOWNLOAD_BASE:-}" ]]; then
-        printf '%s/releases/%s' "$AEGIS_DOWNLOAD_BASE" "$release_version"
-    else
-        printf 'https://github.com/%s/releases/download/v%s' "$GITHUB_REPO" "$release_version"
-    fi
-}
-
-resolve_community_version() {
-    if [[ "$AEGIS_VERSION" == "latest" ]]; then
-        local metadata
-        metadata="$(curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-            "https://api.github.com/repos/${GITHUB_REPO}/releases/latest")" || fatal "Could not resolve the latest Community release. Set AEGIS_VERSION to a published version to retry."
-        AEGIS_VERSION="$(printf '%s' "$metadata" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-    fi
-    AEGIS_VERSION="${AEGIS_VERSION#v}"
-    local semver_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
-    [[ "$AEGIS_VERSION" =~ $semver_pattern ]] || fatal "AEGIS_VERSION must be a full semantic version."
-}
-
-# checksums.txt must be copied unchanged from the matching official release.
-download_community_archive() {
-    local name="$1" destination="$2" release_base checksum_file expected actual
-    release_base="$(community_release_base)"
-    checksum_file="${destination}.checksums"
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-        "${release_base}/checksums.txt" -o "$checksum_file" || fatal "Release checksums are unavailable; installation stopped."
-    expected="$(awk -v name="$name" '$2 == name || $2 == "*" name { print $1 }' "$checksum_file")"
-    [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || fatal "Release checksum entry is missing, duplicated, or invalid."
-    curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-        "${release_base}/${name}" -o "$destination" || fatal "Could not download the selected complete release."
-    actual="$(sha256sum "$destination")"
-    [[ "${actual%% *}" == "${expected,,}" ]] || fatal "Release checksum mismatch; installation stopped."
-    rm -f "$checksum_file"
-}
-
-install_docker_updater() {
-    command -v systemctl >/dev/null || fatal "Automatic Docker upgrades require systemd on the host."
-    local release_base
-    release_base="$(community_release_base)"
-    local updater_archive
-    updater_archive="$(mktemp -d)"
-    download_community_archive "aegis-linux-${ARCH}.tar.gz" "${updater_archive}/release.tar.gz"
-    tar -xzf "${updater_archive}/release.tar.gz" -C "$updater_archive"
-    [[ -s "${updater_archive}/aegis-updater" ]] || fatal "The host updater is missing from the release package."
-    if [[ ! -d "${INSTALL_DIR}/data/rules" && -d "${updater_archive}/data/rules" ]]; then
-        cp -r "${updater_archive}/data/rules" "${INSTALL_DIR}/data/"
-    fi
-    chown -R 65532:65532 "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
-    install -m 755 "${updater_archive}/aegis-updater" "${INSTALL_DIR}/aegis-updater"
-    mkdir -p /etc/aegis /run/aegis /var/lib/aegis /var/lib/aegis-updater
-    chown root:root /var/lib/aegis-updater
-    chmod 700 /var/lib/aegis-updater
-    chown root:aegis /run/aegis
-    chmod 750 /run/aegis
-    cp .env "${INSTALL_DIR}/release.env"
-    chmod 600 "${INSTALL_DIR}/release.env"
-    cat > /etc/aegis/updater.yaml << UPDATER_CONFIG
-updater:
-  mode: docker
-  socket_path: /run/aegis/updater.sock
-  state_path: /var/lib/aegis-updater/updater-state.json
-  releases_root: ${INSTALL_DIR}/releases
-  compose_path: ${INSTALL_DIR}/docker-compose.yml
-  compose_service: aegis
-  release_env_path: ${INSTALL_DIR}/release.env
-  health_url: http://127.0.0.1:${PROXY_PORT}/health
-UPDATER_CONFIG
-    cat > /etc/systemd/system/aegis-updater.service << UPDATER_SERVICE
-[Unit]
-Description=Aegis host release updater
-After=network-online.target docker.service
-Requires=docker.service
-[Service]
-Type=simple
-User=root
-Group=aegis
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=${INSTALL_DIR}/aegis-updater serve --config /etc/aegis/updater.yaml
-Restart=on-failure
-RestartSec=3
-UMask=0027
-RuntimeDirectory=aegis
-RuntimeDirectoryMode=0750
-[Install]
-WantedBy=multi-user.target
-UPDATER_SERVICE
-    systemctl daemon-reload
-    systemctl enable aegis-updater
-    systemctl restart aegis-updater
 }
 
 # ------------------------------------------------------------------------------
@@ -999,49 +908,125 @@ UPDATER_SERVICE
 # ------------------------------------------------------------------------------
 deploy_direct_binary() {
     log_step "Installing Aegis direct binary onto host system..."
-    local native_release_dir="${INSTALL_DIR}/releases/initial-$(date +%s)-$$"
-    mkdir -p "$native_release_dir" "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" /etc/aegis /var/lib/aegis /var/lib/aegis-updater
-    chown root:root /var/lib/aegis-updater
-    chmod 700 /var/lib/aegis-updater
+    mkdir -p "${INSTALL_DIR}/releases/initial" "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" /etc/aegis /var/lib/aegis
+    ln -sfn "${INSTALL_DIR}/releases/initial" "${INSTALL_DIR}/current"
+
+    # Create dedicated system user/group for security isolation
     if ! id -u aegis >/dev/null 2>&1; then
-        useradd -r -s /bin/false -d "${INSTALL_DIR}" -M aegis
+        useradd -r -s /bin/false -d "${INSTALL_DIR}" -M aegis || true
     fi
-    local bin_dest="${native_release_dir}/aegis"
+
+    local bin_dest="${INSTALL_DIR}/releases/initial/aegis"
     local updater_dest="${INSTALL_DIR}/aegis-updater"
-    local ctl_dest="${native_release_dir}/aegisctl"
+    local ctl_dest="${INSTALL_DIR}/aegisctl"
     local symlink_server="/usr/local/bin/aegis"
     local symlink_updater="/usr/local/bin/aegis-updater"
     local symlink_ctl="/usr/local/bin/aegisctl"
-    local release_base
-    release_base="$(community_release_base)"
-    local archive="${native_release_dir}/release.tar.gz"
-    download_community_archive "aegis-linux-${ARCH}.tar.gz" "$archive"
-    tar -xzf "$archive" -C "$native_release_dir" || fatal "Invalid release archive; the current installation was preserved."
-    rm -f "$archive"
-    local component
-    for component in aegis aegisctl aegis-updater; do
-        [[ -s "${native_release_dir}/${component}" ]] || fatal "The release is missing ${component}; the current installation was preserved."
-        chmod 755 "${native_release_dir}/${component}"
-    done
-    local build_info release_version
-    build_info="$("$bin_dest" --build-info)" || fatal "Could not inspect the downloaded release."
-    release_version="$(printf '%s' "$build_info" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-    [[ "${release_version#v}" == "$AEGIS_VERSION" ]] || fatal "The release build version differs from the requested version."
-    [[ "$build_info" == *'"community"'* ]] || fatal "Bootstrap installation requires a Community release."
-    [[ "$("${native_release_dir}/aegis-updater" version)" == "aegis-updater ${release_version} "* ]] || fatal "The updater version differs from the server."
-    [[ "$("$ctl_dest" version)" == *"\"${release_version}\""* ]] || fatal "The CLI version differs from the server."
 
-    # Download and validate every component before touching running services.
+    # Stop existing services and unlink destination binaries to prevent 'Text file busy'
     if command -v systemctl >/dev/null 2>&1; then
         systemctl stop aegis aegis-updater 2>/dev/null || true
     fi
-    install -m 755 "${native_release_dir}/aegis-updater" "${updater_dest}.new"
-    mv -f "${updater_dest}.new" "$updater_dest"
-    ln -s "$native_release_dir" "${INSTALL_DIR}/current.new.$$"
-    mv -Tf "${INSTALL_DIR}/current.new.$$" "${INSTALL_DIR}/current"
-    ln -sfn "${INSTALL_DIR}/current/aegis" "$symlink_server"
-    ln -sfn "$updater_dest" "$symlink_updater"
-    ln -sfn "${INSTALL_DIR}/current/aegisctl" "$symlink_ctl"
+    rm -f "$bin_dest" "$updater_dest" "$ctl_dest" 2>/dev/null || true
+
+    # Download or copy binary
+    local release_base="https://github.com/${GITHUB_REPO}/releases/latest/download"
+    log_info "Downloading or locating Aegis binary (${ARCH})..."
+    
+    local found_server=false
+    if curl -fsSL "${release_base}/aegis-linux-${ARCH}.tar.gz" -o "/tmp/aegis.tar.gz" 2>/dev/null; then
+        tar -xzf "/tmp/aegis.tar.gz" -C "${INSTALL_DIR}/releases/initial/"
+        rm -f "/tmp/aegis.tar.gz"
+        found_server=true
+    elif curl -fsSL "${release_base}/aegis-linux-${ARCH}" -o "$bin_dest" 2>/dev/null; then
+        found_server=true
+    elif curl -fsSL "https://get.divinelab.io/bin/aegis-linux-${ARCH}.tar.gz" -o "/tmp/aegis.tar.gz" 2>/dev/null; then
+        tar -xzf "/tmp/aegis.tar.gz" -C "${INSTALL_DIR}/releases/initial/"
+        rm -f "/tmp/aegis.tar.gz"
+        found_server=true
+    fi
+
+    if ! $found_server; then
+        log_warn "Remote binary download skipped. Checking for local binary..."
+        local search_paths=(
+            "./aegis"
+            "./bin/aegis"
+            "./bin/linux_${ARCH}/aegis"
+            "./bin/linux-${ARCH}/aegis"
+            "../bin/aegis"
+            "../bin/linux_${ARCH}/aegis"
+            "../bin/linux-${ARCH}/aegis"
+            "$(dirname "$0")/../aegis"
+            "$(dirname "$0")/../bin/aegis"
+            "$(dirname "$0")/../bin/linux_${ARCH}/aegis"
+            "/home/aegis/aegis-community/bin/linux_${ARCH}/aegis"
+            "/home/aegis/aegis-community/aegis"
+        )
+        for candidate in "${search_paths[@]}"; do
+            if [[ -f "$candidate" ]]; then
+                log_info "Found local Aegis binary at: $candidate"
+                install -m 755 "$candidate" "$bin_dest" 2>/dev/null || cp -f "$candidate" "$bin_dest"
+                found_server=true
+                break
+            fi
+        done
+    fi
+
+    if [[ ! -f "$bin_dest" ]]; then
+        fatal "Aegis binary was not found at '$bin_dest' and could not be downloaded from GitHub releases ($release_base). Please ensure network connectivity to GitHub or place the pre-built 'aegis' binary in the current directory."
+    fi
+
+    # Check for or copy aegis-updater
+    local search_updater=(
+        "./aegis-updater"
+        "./bin/aegis-updater"
+        "./bin/linux_${ARCH}/aegis-updater"
+        "./bin/linux-${ARCH}/aegis-updater"
+        "../bin/aegis-updater"
+        "../bin/linux_${ARCH}/aegis-updater"
+        "$(dirname "$0")/../aegis-updater"
+        "$(dirname "$0")/../bin/linux_${ARCH}/aegis-updater"
+        "/home/aegis/aegis-community/bin/linux_${ARCH}/aegis-updater"
+        "/home/aegis/aegis-community/aegis-updater"
+    )
+    for candidate_up in "${search_updater[@]}"; do
+        if [[ -f "$candidate_up" ]]; then
+            install -m 755 "$candidate_up" "$updater_dest" 2>/dev/null || cp -f "$candidate_up" "$updater_dest"
+            break
+        fi
+    done
+    if [[ ! -f "$updater_dest" ]]; then
+        curl -fsSL "${release_base}/aegis-updater-linux-${ARCH}" -o "$updater_dest" 2>/dev/null || true
+    fi
+
+    # Check for or copy aegisctl
+    local search_ctl=(
+        "./aegisctl"
+        "./bin/aegisctl"
+        "./bin/linux_${ARCH}/aegisctl"
+        "./bin/linux-${ARCH}/aegisctl"
+        "../bin/aegisctl"
+        "../bin/linux_${ARCH}/aegisctl"
+        "$(dirname "$0")/../aegisctl"
+        "$(dirname "$0")/../bin/linux_${ARCH}/aegisctl"
+        "/home/aegis/aegis-community/bin/linux_${ARCH}/aegisctl"
+        "/home/aegis/aegis-community/aegisctl"
+    )
+    for candidate_ctl in "${search_ctl[@]}"; do
+        if [[ -f "$candidate_ctl" ]]; then
+            install -m 755 "$candidate_ctl" "$ctl_dest" 2>/dev/null || cp -f "$candidate_ctl" "$ctl_dest"
+            break
+        fi
+    done
+    if [[ ! -f "$ctl_dest" ]]; then
+        curl -fsSL "${release_base}/aegisctl-linux-${ARCH}" -o "$ctl_dest" 2>/dev/null || true
+    fi
+
+    chmod +x "$bin_dest" "$updater_dest" "$ctl_dest" 2>/dev/null || true
+    ln -sf "${INSTALL_DIR}/current/aegis" "$symlink_server" 2>/dev/null || true
+    ln -sf "$updater_dest" "$symlink_updater" 2>/dev/null || true
+    ln -sf "$ctl_dest" "$symlink_ctl" 2>/dev/null || true
+
     # Grant low port binding capability (80, 443) to aegis
     if command -v setcap >/dev/null 2>&1; then
         setcap 'cap_net_bind_service=+ep' "$bin_dest" 2>/dev/null || true
@@ -1069,21 +1054,37 @@ deploy_direct_binary() {
         log_warn "Web assets directory was not found in common locations. Admin API will function, but web static files may need to be placed in ${INSTALL_DIR}/web."
     fi
 
-    # Deploy WAF rules
-    log_info "Deploying WAF rules..."
-    if [[ -d "./data/rules" ]]; then
-        mkdir -p "${INSTALL_DIR}/data"
-        cp -r "./data/rules" "${INSTALL_DIR}/data/" 2>/dev/null || true
-    elif [[ -d "$(dirname "$0")/data/rules" ]]; then
-        mkdir -p "${INSTALL_DIR}/data"
-        cp -r "$(dirname "$0")/data/rules" "${INSTALL_DIR}/data/" 2>/dev/null || true
-    elif [[ -d "${INSTALL_DIR}/current/data/rules" && ! -d "${INSTALL_DIR}/data/rules" ]]; then
-        mkdir -p "${INSTALL_DIR}/data"
-        cp -r "${INSTALL_DIR}/current/data/rules" "${INSTALL_DIR}/data/" 2>/dev/null || true
+    # Deploy WAF rules (OWASP CRS and custom rules)
+    log_info "Deploying WAF rules signatures..."
+    local search_rules=(
+        "./data/rules"
+        "./rules"
+        "../data/rules"
+        "../rules"
+        "$(dirname "$0")/data/rules"
+        "$(dirname "$0")/rules"
+        "$(dirname "$0")/../data/rules"
+        "$(dirname "$0")/../rules"
+        "/home/aegis/aegis-community/data/rules"
+        "/home/aegis/aegis-community/rules"
+    )
+    local found_rules=false
+    for candidate_rules in "${search_rules[@]}"; do
+        if [[ -d "$candidate_rules" ]]; then
+            log_info "Found WAF rules at: $candidate_rules"
+            mkdir -p "${INSTALL_DIR}/data"
+            cp -r "$candidate_rules" "${INSTALL_DIR}/data/"
+            ln -sfn "${INSTALL_DIR}/data/rules" "${INSTALL_DIR}/rules" 2>/dev/null || true
+            found_rules=true
+            break
+        fi
+    done
+    if ! $found_rules; then
+        log_warn "WAF rules directory was not found in common locations. Coraza CRS rules may need to be placed in ${INSTALL_DIR}/data/rules."
     fi
 
     # Set ownership
-    chown -R aegis:aegis "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/web" /var/lib/aegis 2>/dev/null || true
+    chown -R aegis:aegis "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/web" "${INSTALL_DIR}/rules" /var/lib/aegis 2>/dev/null || true
     chown -R root:aegis "${INSTALL_DIR}/releases" "${INSTALL_DIR}/current" 2>/dev/null || true
 
     # Ensure local PostgreSQL database and credentials match configuration
@@ -1140,28 +1141,25 @@ AEGIS_LICENSE_KEY=${LICENSE_KEY}
 ENV_EOF
     chmod 600 /etc/aegis/aegis.env
 
-    # Default secure_cookies to false for initial HTTP admin access (can be enabled via admin console when TLS is configured)
+    # Determine secure cookies setting based on admin bind address
     local admin_secure_cookies=false
+    if [[ "$ADMIN_HOST" != "127.0.0.1" && "$ADMIN_HOST" != "localhost" ]]; then
+        admin_secure_cookies=true
+    fi
 
     # Write Config with updater configuration for in-place upgrades
-    cat << CONFIG_EOF > /etc/aegis/config.yaml
+    if [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then
+        cat << CONFIG_EOF > /etc/aegis/config.yaml
 server:
   port: ${PROXY_PORT}
   admin:
     host: "${ADMIN_HOST}"
     port: ${ADMIN_PORT}
-    username: "${ADMIN_USER}"
     setup_completed: true
     secure_cookies: ${admin_secure_cookies}
 
 updater:
   socket_path: /run/aegis/updater.sock
-  mode: native
-  state_path: /var/lib/aegis-updater/updater-state.json
-  releases_root: ${INSTALL_DIR}/releases
-  current_link: ${INSTALL_DIR}/current
-  service_name: aegis.service
-  health_url: http://127.0.0.1:${PROXY_PORT}/health
 
 storage:
   control:
@@ -1174,75 +1172,55 @@ storage:
     password_secret_ref: env:AEGIS_CONTROL_DB_PASSWORD
     ssl_mode: disable
   analytics:
-    enabled: ${CLICKHOUSE_ENABLED}
-    mode: optional
+    enabled: true
+    mode: ${ANALYTICS_MODE}
+    driver: clickhouse
     host: ${CLICKHOUSE_HOST}
     port: ${CLICKHOUSE_PORT}
     database: ${CLICKHOUSE_DB}
     username: ${CLICKHOUSE_USER}
     password_secret_ref: env:AEGIS_ANALYTICS_DB_PASSWORD
     secure: false
+    retention_days: ${ANALYTICS_RETENTION_DAYS}
 
 upstream:
   target: ${UPSTREAM_URL}
-
-sections:
-  waf_core:
-    enabled: true
-    mode: blocking
-    protection_level: 3
-    engine:
-      enable_crs: true
-      anomaly_threshold: 5
-      paranoia_level: 1
-      crs_path: data/rules/crs
-      crs_setup_path: data/rules/crs-setup.conf
-
-  http_security:
-    enabled: true
-    protection_level: 3
-    security_headers:
-      enabled: true
-      hsts: "max-age=31536000; includeSubDomains"
-      x_frame_options: "DENY"
-      x_content_type_options: "nosniff"
-    upload_limit:
-      enabled: true
-      max_body_size: "10MB"
-    method_enforcer:
-      enabled: true
-      mode: "blocklist"
-      blocked_methods:
-        - TRACE
-        - TRACK
-        - CONNECT
-        - DEBUG
-
-  traffic_control:
-    enabled: true
-    protection_level: 3
-    rate_limit:
-      enabled: true
-      default_rate: 60
-      default_burst: 10
-      window: "1m"
-      key_by: "ip"
-    blacklist:
-      enabled: true
 CONFIG_EOF
+    else
+        cat << CONFIG_EOF > /etc/aegis/config.yaml
+server:
+  port: ${PROXY_PORT}
+  admin:
+    host: "${ADMIN_HOST}"
+    port: ${ADMIN_PORT}
+    setup_completed: true
+    secure_cookies: ${admin_secure_cookies}
 
-    # Setup Systemd Services (both aegis-server and aegis-updater)
-    cat > /etc/aegis/updater.yaml << UPDATER_CONFIG
 updater:
   socket_path: /run/aegis/updater.sock
-  mode: native
-  state_path: /var/lib/aegis-updater/updater-state.json
-  releases_root: ${INSTALL_DIR}/releases
-  current_link: ${INSTALL_DIR}/current
-  service_name: aegis.service
-  health_url: http://127.0.0.1:${PROXY_PORT}/health
-UPDATER_CONFIG
-    chmod 600 /etc/aegis/updater.yaml
+
+storage:
+  control:
+    enabled: true
+    driver: postgresql
+    host: ${POSTGRES_HOST}
+    port: ${POSTGRES_PORT}
+    database: ${POSTGRES_DB}
+    username: ${POSTGRES_USER}
+    password_secret_ref: env:AEGIS_CONTROL_DB_PASSWORD
+    ssl_mode: disable
+  analytics:
+    enabled: false
+    mode: ${ANALYTICS_MODE}
+    driver: postgresql
+    retention_days: ${ANALYTICS_RETENTION_DAYS}
+
+upstream:
+  target: ${UPSTREAM_URL}
+CONFIG_EOF
+    fi
+
+    # Setup Systemd Services (both aegis-server and aegis-updater)
     if command -v systemctl >/dev/null 2>&1; then
         cat << SYSTEMD_EOF > /etc/systemd/system/aegis.service
 [Unit]
@@ -1269,6 +1247,8 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
+RuntimeDirectory=aegis
+RuntimeDirectoryMode=0775
 
 [Install]
 WantedBy=multi-user.target
@@ -1283,18 +1263,17 @@ After=network.target
 [Service]
 Type=simple
 User=root
-Group=aegis
+Group=root
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${INSTALL_DIR}/current/aegis-updater serve --config /etc/aegis/updater.yaml
+ExecStart=${INSTALL_DIR}/aegis-updater serve --config /etc/aegis/config.yaml
 Restart=on-failure
 RestartSec=5s
 RuntimeDirectory=aegis
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0775
 
 [Install]
 WantedBy=multi-user.target
 UPDATER_EOF
-
         systemctl daemon-reload
         systemctl enable aegis-updater 2>/dev/null || true
         systemctl restart aegis-updater 2>/dev/null || systemctl start aegis-updater || true
@@ -1303,10 +1282,10 @@ UPDATER_EOF
 
         log_info "Waiting for Aegis service to initialize..."
         local attempts=0
-        local max_attempts=30
+        local max_attempts=15
         local started=false
         while [[ $attempts -lt $max_attempts ]]; do
-            if systemctl is-active --quiet aegis aegis-updater && curl --fail --silent "http://127.0.0.1:${PROXY_PORT}/health/ready" >/dev/null; then
+            if systemctl is-active --quiet aegis; then
                 started=true
                 break
             fi
@@ -1317,7 +1296,7 @@ UPDATER_EOF
         if $started; then
             log_success "Systemd services (aegis & aegis-updater) created, started, and verified active."
         else
-            fatal "Aegis services did not become ready. Check systemctl status aegis aegis-updater and journalctl -u aegis."
+            log_warn "Aegis service did not start immediately. Check status with: systemctl status aegis"
         fi
     fi
 }
@@ -1352,12 +1331,14 @@ finalize_installation() {
     Username   : ${POSTGRES_USER}
     Password   : ${POSTGRES_PASSWORD}
   
-  Analytics Database (ClickHouse):
-    Status     : $(if $CLICKHOUSE_ENABLED; then echo "Enabled"; else echo "Disabled (Core WAF mode)"; fi)
-    Host       : $(if [[ "$DEPLOY_METHOD" == "docker" ]]; then echo "clickhouse (internal) / localhost:9000"; else echo "${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"; fi)
-    Database   : ${CLICKHOUSE_DB}
-    Username   : ${CLICKHOUSE_USER}
-    Password   : ${CLICKHOUSE_PASSWORD}
+  Analytics Database:
+    Engine     : $(if [[ "$ANALYTICS_MODE" == "disabled" ]]; then echo "Disabled (Core WAF mode)"; elif [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then echo "ClickHouse (${ANALYTICS_RETENTION_DAYS}-day retention)"; else echo "PostgreSQL (Shared with Control DB, ${ANALYTICS_RETENTION_DAYS}-day retention)"; fi)
+$(if [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then
+    echo "    Host       : $(if [[ "$DEPLOY_METHOD" == "docker" ]]; then echo "clickhouse (internal) / localhost:9000"; else echo "${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"; fi)"
+    echo "    Database   : ${CLICKHOUSE_DB}"
+    echo "    Username   : ${CLICKHOUSE_USER}"
+    echo "    Password   : ${CLICKHOUSE_PASSWORD}"
+fi)
 
 [4] SECURITY & SIGNING KEYS:
   JWT Secret   : ${JWT_SECRET}
@@ -1405,14 +1386,16 @@ CREDS_EOF
     echo -e "    Database   : ${POSTGRES_DB}"
     echo -e "    Username   : ${POSTGRES_USER}"
     echo -e "    Password   : ${YELLOW}${BOLD}${POSTGRES_PASSWORD}${RESET}"
-    if $CLICKHOUSE_ENABLED; then
+    if [[ "$ANALYTICS_MODE" == "disabled" ]]; then
+        echo -e "  Traffic Analytics     : ${DIM}Disabled (Running in Core WAF Mode)${RESET}"
+    elif [[ "$CLICKHOUSE_ENABLED" == "true" ]]; then
         echo -e "  ClickHouse Analytics  :"
         echo -e "    Host       : $(if [[ "$DEPLOY_METHOD" == "docker" ]]; then echo "clickhouse:9000 (container)"; else echo "${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"; fi)"
         echo -e "    Database   : ${CLICKHOUSE_DB}"
         echo -e "    Username   : ${CLICKHOUSE_USER}"
         echo -e "    Password   : ${YELLOW}${BOLD}${CLICKHOUSE_PASSWORD}${RESET}"
     else
-        echo -e "  ClickHouse Analytics  : ${DIM}Disabled (Running in Core WAF Mode)${RESET}"
+        echo -e "  Traffic Analytics     : ${GREEN}PostgreSQL (Shared with Control DB, ${ANALYTICS_RETENTION_DAYS}-day retention)${RESET}"
     fi
     echo ""
     echo -e "${CYAN}${BOLD}[4] SECURITY & SECRETS${RESET}"
@@ -1462,10 +1445,6 @@ parse_args() {
                 DEPLOY_METHOD="direct"
                 shift
                 ;;
-            --no-clickhouse|--disable-clickhouse|--skip-clickhouse)
-                CLICKHOUSE_ENABLED=false
-                shift
-                ;;
             --dir)
                 INSTALL_DIR="$2"
                 shift 2
@@ -1494,6 +1473,17 @@ parse_args() {
                 LICENSE_KEY="$2"
                 shift 2
                 ;;
+            --with-clickhouse)
+                CLICKHOUSE_ENABLED=true
+                ANALYTICS_DRIVER="clickhouse"
+                shift
+                ;;
+            --without-analytics)
+                CLICKHOUSE_ENABLED=false
+                ANALYTICS_DRIVER="postgresql"
+                ANALYTICS_MODE="disabled"
+                shift
+                ;;
             --help|-h)
                 log_banner
                 echo "Usage: sudo bash install.sh [OPTIONS]"
@@ -1503,7 +1493,6 @@ parse_args() {
                 echo "  --interactive, -i    Run in Guided mode (interactive prompt for each parameter)"
                 echo "  --docker             Force Docker deployment"
                 echo "  --direct             Force Direct binary (systemd) deployment"
-                echo "  --no-clickhouse      Disable ClickHouse analytics (Run in lightweight Core WAF mode)"
                 echo "  --dir <path>         Target directory (Default: /opt/aegis)"
                 echo "  --admin-password <p> Set custom admin password"
                 echo "  --admin-host <host>  Set admin listen host (Default: 0.0.0.0)"
@@ -1511,6 +1500,8 @@ parse_args() {
                 echo "  --admin-port <port>  Set custom admin port (Default: 8081)"
                 echo "  --upstream <url>     Set upstream destination (Default: http://localhost:3000)"
                 echo "  --license <key>      Set enterprise license token"
+                echo "  --with-clickhouse    Enable optional ClickHouse analytics engine instead of PostgreSQL"
+                echo "  --without-analytics  Disable traffic analytics completely"
                 echo "  --help, -h           Show this help message"
                 exit 0
                 ;;
@@ -1529,9 +1520,7 @@ main() {
     parse_args "$@"
     log_banner
     check_root
-    [[ ! -e "${INSTALL_DIR}/current" && ! -L "${INSTALL_DIR}/current" && ! -f /etc/aegis/config.yaml && ! -f "${INSTALL_DIR}/config.yaml" && ! -f "${INSTALL_DIR}/docker-compose.yml" ]] || fatal "An Aegis installation already exists. Use its updater for version or edition changes; the bootstrap installer will not replace its configuration."
     detect_environment
-    resolve_community_version
     resolve_deploy_method
     resolve_install_mode
     resolve_direct_databases

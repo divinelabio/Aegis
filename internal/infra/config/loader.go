@@ -57,21 +57,8 @@ func (c *Config) GetLicenseConfig() (apiURL, stateDir string) {
 }
 
 type UpdaterConfig struct {
-	SocketPath       string `mapstructure:"socket_path" json:"socket_path" yaml:"socket_path"`
-	StatePath        string `mapstructure:"state_path" json:"state_path" yaml:"state_path"`
-	ReleasesRoot     string `mapstructure:"releases_root" json:"releases_root" yaml:"releases_root"`
-	CurrentLink      string `mapstructure:"current_link" json:"current_link" yaml:"current_link"`
-	ServiceName      string `mapstructure:"service_name" json:"service_name" yaml:"service_name"`
-	HealthURL        string `mapstructure:"health_url" json:"health_url" yaml:"health_url"`
-	Mode             string `mapstructure:"mode" json:"mode" yaml:"mode"`
-	ComposePath      string `mapstructure:"compose_path" json:"compose_path" yaml:"compose_path"`
-	ComposeService   string `mapstructure:"compose_service" json:"compose_service" yaml:"compose_service"`
-	ReleaseEnvPath   string `mapstructure:"release_env_path" json:"release_env_path" yaml:"release_env_path"`
-	ContainerRuntime string `mapstructure:"container_runtime" json:"container_runtime" yaml:"container_runtime"`
+	SocketPath string `mapstructure:"socket_path" json:"socket_path"`
 }
-
-func (c *Config) GetUpdaterMode() string   { return c.Updater.Mode }
-func (c *Config) GetUpdaterSocket() string { return c.Updater.SocketPath }
 
 type ServerConfig struct {
 	Port              int         `mapstructure:"port"`
@@ -758,7 +745,7 @@ func configureConfigViper(settings *viper.Viper, path string) {
 	settings.SetDefault("server.idle_timeout", "120s")
 	settings.SetDefault("server.max_header_bytes", 1048576)
 	settings.SetDefault("server.enable_http3", true)
-	settings.SetDefault("server.admin.host", "0.0.0.0")
+	settings.SetDefault("server.admin.host", "127.0.0.1")
 	settings.SetDefault("server.admin.port", 8081)
 	settings.SetDefault("server.admin.username", "admin")
 	settings.SetDefault("server.admin.secure_cookies", false)
@@ -783,14 +770,15 @@ func configureConfigViper(settings *viper.Viper, path string) {
 	settings.SetDefault("storage.control.username", "aegis")
 	settings.SetDefault("storage.control.password_secret_ref", "")
 	settings.SetDefault("storage.control.ssl_mode", "disable")
-	settings.SetDefault("storage.analytics.mode", string(storage.AnalyticsModeDisabled))
-	settings.SetDefault("storage.analytics.driver", string(storage.DriverClickHouse))
+	settings.SetDefault("storage.analytics.mode", string(storage.AnalyticsModeOptional))
+	settings.SetDefault("storage.analytics.driver", string(storage.DriverPostgreSQL))
 	settings.SetDefault("storage.analytics.host", "localhost")
 	settings.SetDefault("storage.analytics.port", 9000)
 	settings.SetDefault("storage.analytics.database", "aegis")
 	settings.SetDefault("storage.analytics.username", "default")
 	settings.SetDefault("storage.analytics.password_secret_ref", "")
 	settings.SetDefault("storage.analytics.secure", false)
+	settings.SetDefault("storage.analytics.retention_days", storage.DefaultAnalyticsRetentionDays)
 	settings.SetDefault("storage.analytics.max_open_conns", 20)
 	settings.SetDefault("storage.analytics.max_idle_conns", 10)
 	settings.SetDefault("storage.analytics.conn_max_lifetime", time.Hour)
@@ -826,19 +814,6 @@ func configureConfigViper(settings *viper.Viper, path string) {
 	settings.SetDefault("infrastructure.trusted_proxies.source_files", []string{})
 	settings.SetDefault("infrastructure.trusted_proxies.source_root", "./data/trusted-proxies/sources")
 	settings.SetDefault("infrastructure.trusted_proxies.combined_list", "./data/trusted-proxies/combined.list")
-	settings.SetDefault("sections.waf_core.enabled", true)
-	settings.SetDefault("sections.waf_core.mode", "blocking")
-	settings.SetDefault("sections.waf_core.protection_level", 3)
-	settings.SetDefault("sections.waf_core.engine.enable_crs", true)
-	settings.SetDefault("sections.waf_core.engine.anomaly_threshold", 5)
-	settings.SetDefault("sections.waf_core.engine.paranoia_level", 1)
-	settings.SetDefault("sections.waf_core.engine.crs_path", "data/rules/crs")
-	settings.SetDefault("sections.waf_core.engine.crs_setup_path", "data/rules/crs-setup.conf")
-	settings.SetDefault("sections.waf_core.validation.max_body_size", int64(10<<20))
-	settings.SetDefault("sections.http_security.enabled", true)
-	settings.SetDefault("sections.http_security.protection_level", 3)
-	settings.SetDefault("sections.traffic_control.enabled", true)
-	settings.SetDefault("sections.traffic_control.protection_level", 3)
 	settings.AutomaticEnv()
 	settings.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 }
@@ -1149,7 +1124,17 @@ func applyAnalyticsDatabaseEnvOverrides(analytics *storage.AnalyticsConfig) {
 	if v := os.Getenv("AEGIS_ANALYTICS_DRIVER"); v != "" {
 		analytics.Driver = storage.DBDriver(v)
 	} else if analytics.Driver == "" {
-		analytics.Driver = storage.DriverClickHouse
+		analytics.Driver = storage.DriverPostgreSQL
+	} else {
+		analytics.Driver = analytics.EffectiveDriver()
+	}
+	if v := os.Getenv("AEGIS_ANALYTICS_RETENTION_DAYS"); v != "" {
+		if days, err := strconv.Atoi(v); err == nil {
+			analytics.RetentionDays = days
+		}
+	}
+	if analytics.RetentionDays == 0 {
+		analytics.RetentionDays = storage.DefaultAnalyticsRetentionDays
 	}
 	if analytics.MaxOpenConns <= 0 {
 		analytics.MaxOpenConns = 20
@@ -1323,13 +1308,17 @@ func UpdateStorageControlConfig(next storage.ControlConfig) error {
 	})
 }
 
-// UpdateStorageAnalyticsConfig persists a complete ClickHouse analytics
+// UpdateStorageAnalyticsConfig persists a complete analytics storage
 // revision. It accepts only a secret reference, never a password, and leaves
 // the active analytics client unchanged until the next process start.
 func UpdateStorageAnalyticsConfig(next storage.AnalyticsConfig) error {
+	next.Driver = next.EffectiveDriver()
 	next.Mode = next.EffectiveMode()
+	if next.RetentionDays == 0 {
+		next.RetentionDays = storage.DefaultAnalyticsRetentionDays
+	}
 	if err := next.Validate(); err != nil {
-		return fmt.Errorf("invalid ClickHouse analytics configuration: %w", err)
+		return fmt.Errorf("invalid analytics storage configuration: %w", err)
 	}
 	updateMu.Lock()
 	defer updateMu.Unlock()
@@ -1342,6 +1331,7 @@ func UpdateStorageAnalyticsConfig(next storage.AnalyticsConfig) error {
 		"username":            next.Username,
 		"password_secret_ref": next.PasswordSecretRef,
 		"secure":              next.Secure,
+		"retention_days":      next.RetentionDays,
 		"max_open_conns":      next.MaxOpenConns,
 		"max_idle_conns":      next.MaxIdleConns,
 		"conn_max_lifetime":   next.ConnMaxLifetime,
@@ -1380,6 +1370,7 @@ func AnalyticsDatabaseConfigurationEnvironmentLocked() bool {
 		"AEGIS_ANALYTICS_PASSWORD_SECRET_REF",
 		"AEGIS_ANALYTICS_SECURE",
 		"AEGIS_ANALYTICS_DRIVER",
+		"AEGIS_ANALYTICS_RETENTION_DAYS",
 	} {
 		if os.Getenv(key) != "" {
 			return true
@@ -1818,9 +1809,6 @@ func (c *Config) GetSectionsConfigMap() map[string]sections.SectionConfig {
 
 	// WAF Core
 	wafSettings := structToMap(c.Sections.WAFCore)
-	if wafSettings == nil {
-		wafSettings = map[string]interface{}{}
-	}
 	httpSettings := c.Sections.HTTPSecurity
 	if httpSettings == nil {
 		httpSettings = map[string]interface{}{}
@@ -1834,60 +1822,9 @@ func (c *Config) GetSectionsConfigMap() map[string]sections.SectionConfig {
 		}
 	}
 
-	wafEnabled := true
-	if e, ok := wafSettings["enabled"].(bool); ok {
-		wafEnabled = e
-	} else if c.Sections.WAFCore.Enabled {
-		wafEnabled = true
-	} else if viper.IsSet("sections.waf_core.enabled") {
-		wafEnabled = c.Sections.WAFCore.Enabled
-	}
-
-	wafMode := c.Sections.WAFCore.Mode
-	if wafMode == "" {
-		if m, ok := wafSettings["mode"].(string); ok && m != "" {
-			wafMode = m
-		} else {
-			wafMode = "blocking"
-		}
-	}
-	wafSettings["enabled"] = wafEnabled
-	wafSettings["mode"] = wafMode
-
-	wafProtection := 3
-	if c.Sections.WAFCore.ProtectionLevel > 0 {
-		wafProtection = c.Sections.WAFCore.ProtectionLevel
-	} else if p, ok := wafSettings["protection_level"].(int); ok && p > 0 {
-		wafProtection = p
-	} else if p, ok := wafSettings["protection_level"].(float64); ok && p > 0 {
-		wafProtection = int(p)
-	}
-	wafSettings["protection_level"] = wafProtection
-
-	engineSettings, _ := wafSettings["engine"].(map[string]interface{})
-	if engineSettings == nil {
-		engineSettings = map[string]interface{}{}
-	}
-	if _, ok := engineSettings["enable_crs"]; !ok {
-		engineSettings["enable_crs"] = true
-	}
-	if _, ok := engineSettings["anomaly_threshold"]; !ok {
-		engineSettings["anomaly_threshold"] = 5
-	}
-	if _, ok := engineSettings["paranoia_level"]; !ok {
-		engineSettings["paranoia_level"] = 1
-	}
-	if _, ok := engineSettings["crs_path"]; !ok || engineSettings["crs_path"] == "" {
-		engineSettings["crs_path"] = "data/rules/crs"
-	}
-	if _, ok := engineSettings["crs_setup_path"]; !ok || engineSettings["crs_setup_path"] == "" {
-		engineSettings["crs_setup_path"] = "data/rules/crs-setup.conf"
-	}
-	wafSettings["engine"] = engineSettings
-
 	m["waf_core"] = sections.SectionConfig{
-		Enabled:         wafEnabled,
-		ProtectionLevel: wafProtection,
+		Enabled:         c.Sections.WAFCore.Enabled,
+		ProtectionLevel: c.Sections.WAFCore.ProtectionLevel,
 		Settings:        wafSettings,
 	}
 
@@ -2000,7 +1937,11 @@ func (c *Config) Validate() error {
 	if err := c.Modules.ErrorPages.Validate(); err != nil {
 		return err
 	}
+	c.Storage.Analytics.Driver = c.Storage.Analytics.EffectiveDriver()
 	c.Storage.Analytics.Mode = c.Storage.Analytics.EffectiveMode()
+	if c.Storage.Analytics.RetentionDays == 0 {
+		c.Storage.Analytics.RetentionDays = storage.DefaultAnalyticsRetentionDays
+	}
 	if err := c.Storage.Analytics.Validate(); err != nil {
 		return err
 	}

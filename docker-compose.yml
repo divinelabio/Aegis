@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${AEGIS_CONTROL_DB_USER:-aegis}
       POSTGRES_PASSWORD: ${AEGIS_CONTROL_DB_PASSWORD:-testdb}
     ports:
-      - "127.0.0.1:${AEGIS_CONTROL_DB_PORT:-5433}:5432"
+      - "${AEGIS_CONTROL_DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,10 +19,11 @@ services:
       timeout: 3s
       retries: 10
 
-  # ClickHouse Real-Time Telemetry & Attack Analytics
   clickhouse:
     image: docker.io/clickhouse/clickhouse-server:25.8
     container_name: aegis_clickhouse
+    profiles:
+      - clickhouse
     restart: unless-stopped
     security_opt:
       - label=disable
@@ -31,8 +32,8 @@ services:
       CLICKHOUSE_USER: ${AEGIS_ANALYTICS_USERNAME:-default}
       CLICKHOUSE_PASSWORD: ${AEGIS_ANALYTICS_DB_PASSWORD:-}
     ports:
-      - "127.0.0.1:${AEGIS_ANALYTICS_PORT:-9000}:9000"
-      - "127.0.0.1:${AEGIS_ANALYTICS_HTTP_PORT:-8123}:8123"
+      - "${AEGIS_ANALYTICS_PORT:-9000}:9000"
+      - "${AEGIS_ANALYTICS_HTTP_PORT:-8123}:8123"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
@@ -42,7 +43,6 @@ services:
       timeout: 3s
       retries: 10
 
-  # Redis Distributed Session / Rate-Limiting Cache
   redis:
     image: docker.io/library/redis:7-alpine
     container_name: aegis_redis
@@ -50,7 +50,7 @@ services:
     security_opt:
       - label=disable
     ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -69,8 +69,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      clickhouse:
-        condition: service_healthy
     environment:
       AEGIS_ADMIN_PASSWORD: ${AEGIS_ADMIN_PASSWORD:-admin}
       AEGIS_CONTROL_DB_HOST: postgres
@@ -78,20 +76,13 @@ services:
       AEGIS_CONTROL_DB_NAME: ${AEGIS_CONTROL_DB_NAME:-aegis}
       AEGIS_CONTROL_DB_USER: ${AEGIS_CONTROL_DB_USER:-aegis}
       AEGIS_CONTROL_DB_PASSWORD: ${AEGIS_CONTROL_DB_PASSWORD:-testdb}
-      AEGIS_ANALYTICS_MODE: ${AEGIS_ANALYTICS_MODE:-optional}
-      AEGIS_ANALYTICS_HOST: clickhouse
-      AEGIS_ANALYTICS_PORT: "9000"
-      AEGIS_ANALYTICS_DATABASE: ${AEGIS_ANALYTICS_DATABASE:-aegis}
-      AEGIS_ANALYTICS_USERNAME: ${AEGIS_ANALYTICS_USERNAME:-default}
-      AEGIS_ANALYTICS_DB_PASSWORD: ${AEGIS_ANALYTICS_DB_PASSWORD:-clickhouse}
+      AEGIS_ANALYTICS_DB_PASSWORD: ${AEGIS_ANALYTICS_DB_PASSWORD:-}
     ports:
       - "${AEGIS_PROXY_PORT:-8080}:8080"
       - "${AEGIS_ADMIN_PORT:-8081}:8081"
     volumes:
       - ./config.yaml:/var/lib/aegis/config.yaml:ro
       - aegis_data:/var/lib/aegis/data
-      - ./data/rules:/var/lib/aegis/data/rules:ro
-      - ./data/rules:/var/lib/aegis/rules:ro
 
 volumes:
   postgres_data:

@@ -594,7 +594,7 @@ func readSanitizedConfigYAML(path string) ([]byte, error) {
 	return sanitizedConfigYAML(data)
 }
 
-// HandleUnavailableFeature is a placeholder for routes that are not
+// HandleUnavailableFeature handles routes that are not
 // available in the community edition.
 func (h *Handler) HandleUnavailableFeature(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -925,13 +925,8 @@ func (h *Handler) HandleConfigReset(w http.ResponseWriter, r *http.Request) {
 storage:
   analytics:
     mode: optional
-    driver: clickhouse
-    host: 127.0.0.1
-    port: 9000
-    database: aegis
-    username: default
-    password_secret_ref: env:AEGIS_ANALYTICS_DB_PASSWORD
-    secure: false
+    driver: postgresql
+    retention_days: 30
 telemetry:
   prometheus_enabled: false
   prometheus_path: /metrics

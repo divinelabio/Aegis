@@ -21,8 +21,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/divinelabio/aegis/internal/infra/requestctx"
+	"github.com/divinelabio/aegis/internal/infra/storage"
+	"github.com/divinelabio/aegis/internal/infra/telemetry"
 	"github.com/divinelabio/aegis/internal/infra/transport"
 	"github.com/divinelabio/aegis/internal/sections"
+	"github.com/google/uuid"
 	"github.com/mitchellh/mapstructure"
 	"go.uber.org/zap"
 )
@@ -262,8 +266,9 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 		}
 		s.total.Add(1)
 
-		writeErrorResponse := func(status int, reason string) {
+		writeErrorResponse := func(status int, functionID, ruleID, ruleName, reason string) {
 			s.blocked.Add(1)
+			s.logSecurityEvent(r, "block", status, functionID, ruleID, ruleName, reason, 10)
 			if !transport.WriteConfiguredErrorPage(w, r, status) {
 				http.Error(w, reason, status)
 			}
@@ -279,6 +284,7 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 				host = "localhost"
 			}
 			target := "https://" + host + r.URL.RequestURI()
+			s.logSecurityEvent(r, "redirect", statusCode, "https_redirect", "http-https-redirect", "HTTPS Redirect", "Redirected HTTP request to HTTPS", 0)
 			http.Redirect(w, r, target, statusCode)
 			return
 		}
@@ -292,11 +298,11 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 			}
 		}
 
-		if status, reason := validateRequest(r, c); status != 0 {
+		if status, functionID, ruleID, ruleName, reason := validateRequestDetailed(r, c); status != 0 {
 			if status == http.StatusMethodNotAllowed && c.MethodEnforcer.Mode == "allowlist" && len(c.MethodEnforcer.AllowedMethods) > 0 {
 				w.Header().Set("Allow", strings.Join(c.MethodEnforcer.AllowedMethods, ", "))
 			}
-			writeErrorResponse(status, reason)
+			writeErrorResponse(status, functionID, ruleID, ruleName, reason)
 			return
 		}
 
@@ -311,23 +317,27 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 			}
 			body, err := io.ReadAll(io.LimitReader(r.Body, max+1))
 			if err != nil || int64(len(body)) > max {
-				writeErrorResponse(http.StatusRequestEntityTooLarge, "Request body too large")
+				writeErrorResponse(http.StatusRequestEntityTooLarge, "upload_limit", "http-upload-limit", "Upload Body Size Limit", "Request body too large")
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			if err := validateMultipartBody(r.Header.Get("Content-Type"), body); err != nil {
-				writeErrorResponse(http.StatusBadRequest, "Malformed multipart request")
+				writeErrorResponse(http.StatusBadRequest, "upload_protection", "http-multipart-malformed", "Malformed Multipart Request", "Malformed multipart request")
 				return
 			}
 			if c.ExtensionFilter.Enabled && blockedUpload(body, r.Header.Get("Content-Type"), c.ExtensionFilter.BlockedExtensions) {
-				writeErrorResponse(http.StatusForbidden, "File extension is not allowed")
+				writeErrorResponse(http.StatusForbidden, "extension_filter", "http-extension-filter", "Blocked Upload Extension", "File extension is not allowed")
 				return
 			}
 			if c.UploadProtection.Enabled {
 				uploadResult := NewUploadProtectionEngine(c.UploadProtection).Inspect(r, body, false)
-				if uploadResult.Blocked() && !strings.EqualFold(c.UploadProtection.Mode, "detect") {
-					writeErrorResponse(http.StatusForbidden, "Forbidden - Upload Protection")
-					return
+				if uploadResult.Blocked() {
+					if strings.EqualFold(c.UploadProtection.Mode, "detect") {
+						s.logSecurityEvent(r, "detect", http.StatusOK, "upload_protection", "http-upload-protection", "Upload Protection", "Suspicious upload detected", 8)
+					} else {
+						writeErrorResponse(http.StatusForbidden, "upload_protection", "http-upload-protection", "Upload Protection", "Forbidden - Upload Protection")
+						return
+					}
 				}
 			}
 		} else if c.UploadLimit.Enabled && maxBody > 0 && r.Body != nil {
@@ -343,28 +353,131 @@ func (s *Section) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Section) logSecurityEvent(r *http.Request, action string, status int, functionID, ruleID, ruleName, reason string, score int) {
+	if r == nil {
+		return
+	}
+	identity, _ := requestctx.FromRequest(r)
+	clientIP := identity.ClientIP
+	if clientIP == "" {
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			clientIP = host
+		} else {
+			clientIP = strings.TrimSpace(r.RemoteAddr)
+		}
+	}
+	reqID := telemetry.RequestIDFromRequest(r)
+	latencyMs := telemetry.RequestLatencyMs(r)
+
+	telemetry.UpdateRequestLogMetadata(r, telemetry.RequestLogMetadata{
+		Host:     r.Host,
+		RuleID:   ruleID,
+		RuleName: ruleName,
+		RuleType: SectionID,
+		Action:   action,
+		Blocked:  action == "block",
+	})
+
+	severity := "medium"
+	if score >= 10 {
+		severity = "high"
+	} else if score == 0 {
+		severity = "low"
+	}
+	categoriesJSON, _ := json.Marshal([]string{functionID})
+	severitiesJSON, _ := json.Marshal([]string{severity})
+	meta := map[string]string{
+		"function":       functionID,
+		"reason":         reason,
+		"host":           r.Host,
+		"query_string":   r.URL.RawQuery,
+		"content_type":   r.Header.Get("Content-Type"),
+		"header_count":   strconv.Itoa(len(r.Header)),
+		"content_length": strconv.FormatInt(maxInt64(0, r.ContentLength), 10),
+		"category":       functionID,
+		"categories":     string(categoriesJSON),
+		"severity":       severity,
+		"severities":     string(severitiesJSON),
+	}
+	if ja3 := firstNonEmptyHTTP(identity.TLS.JA3, r.Header.Get("X-Aegis-TLS-JA3")); ja3 != "" {
+		meta["ja3"] = ja3
+	}
+	if ja4 := firstNonEmptyHTTP(identity.TLS.JA4, r.Header.Get("X-Aegis-TLS-JA4")); ja4 != "" {
+		meta["ja4"] = ja4
+	}
+	if asn := strings.TrimSpace(r.Header.Get("X-Aegis-ASN")); asn != "" {
+		meta["asn"] = asn
+	}
+	if asnOrg := strings.TrimSpace(r.Header.Get("X-Aegis-ASN-Org")); asnOrg != "" {
+		meta["asn_org"] = asnOrg
+	}
+	rawMeta, _ := json.Marshal(meta)
+
+	storage.LogSectionEvent(storage.SectionEventLog{
+		ID:         uuid.NewString(),
+		Timestamp:  time.Now().Unix(),
+		Section:    SectionID,
+		EventType:  functionID,
+		Action:     action,
+		ClientIP:   clientIP,
+		Country:    identity.Geo.Country,
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		StatusCode: status,
+		LatencyMs:  latencyMs,
+		UserAgent:  r.UserAgent(),
+		RuleID:     ruleID,
+		RuleName:   ruleName,
+		RuleType:   functionID,
+		Score:      score,
+		RequestID:  reqID,
+		Metadata:   string(rawMeta),
+	})
+}
+
+func firstNonEmptyHTTP(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func validateRequest(r *http.Request, c Config) (int, string) {
+	status, _, _, _, reason := validateRequestDetailed(r, c)
+	return status, reason
+}
+
+func validateRequestDetailed(r *http.Request, c Config) (int, string, string, string, string) {
 	if c.UploadLimit.Enabled {
 		max := parseSize(c.UploadLimit.MaxBodySize)
 		if max > 0 && r.ContentLength > max {
-			return http.StatusRequestEntityTooLarge, "Request body too large"
+			return http.StatusRequestEntityTooLarge, "upload_limit", "http-upload-limit", "Upload Body Size Limit", "Request body too large"
 		}
 	}
 	method := strings.ToUpper(strings.TrimSpace(r.Method))
 	if c.MethodEnforcer.Enabled {
 		if c.MethodEnforcer.Mode == "allowlist" && !containsFold(c.MethodEnforcer.AllowedMethods, method) {
-			return http.StatusMethodNotAllowed, "Method not allowed"
+			return http.StatusMethodNotAllowed, "method_enforcer", "http-method-enforcer", "HTTP Method Enforcer", "Method not allowed"
 		}
 		if c.MethodEnforcer.Mode == "blocklist" && containsFold(c.MethodEnforcer.BlockedMethods, method) {
-			return http.StatusMethodNotAllowed, "Method not allowed"
+			return http.StatusMethodNotAllowed, "method_enforcer", "http-method-enforcer", "HTTP Method Enforcer", "Method not allowed"
 		}
 	}
 	if c.HostValidator.Enabled && len(c.HostValidator.AllowedHosts) > 0 && !hostAllowed(r.Host, c.HostValidator.AllowedHosts) {
-		return http.StatusBadRequest, "Host is not allowed"
+		return http.StatusBadRequest, "host_validator", "http-host-validator", "Host Header Validator", "Host is not allowed"
 	}
 	if c.ContentTypeValidator.Enabled && containsFold(c.ContentTypeValidator.RequiredOn, method) {
 		if _, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil {
-			return http.StatusUnsupportedMediaType, "Valid Content-Type is required"
+			return http.StatusUnsupportedMediaType, "content_type_validator", "http-content-type", "Content-Type Validator", "Valid Content-Type is required"
 		}
 	}
 	if c.RequestSizeGuard.Enabled {
@@ -373,20 +486,20 @@ func validateRequest(r *http.Request, c Config) (int, string) {
 			rawURI = r.URL.String()
 		}
 		if c.RequestSizeGuard.MaxURLLength > 0 && len(rawURI) > c.RequestSizeGuard.MaxURLLength || c.RequestSizeGuard.MaxQueryLength > 0 && len(r.URL.RawQuery) > c.RequestSizeGuard.MaxQueryLength {
-			return http.StatusRequestURITooLong, "Request URI is too long"
+			return http.StatusRequestURITooLong, "request_size_guard", "http-uri-length", "Request URI Length Guard", "Request URI is too long"
 		}
 		if c.RequestSizeGuard.MaxHeaderCount > 0 && len(r.Header) > c.RequestSizeGuard.MaxHeaderCount {
-			return http.StatusRequestHeaderFieldsTooLarge, "Too many headers"
+			return http.StatusRequestHeaderFieldsTooLarge, "request_size_guard", "http-header-count", "Request Header Count Guard", "Too many headers"
 		}
 		for name, values := range r.Header {
 			for _, value := range values {
 				if c.RequestSizeGuard.MaxSingleHeaderSize > 0 && len(name)+len(value) > c.RequestSizeGuard.MaxSingleHeaderSize {
-					return http.StatusRequestHeaderFieldsTooLarge, "Header is too large"
+					return http.StatusRequestHeaderFieldsTooLarge, "request_size_guard", "http-header-size", "Request Header Size Guard", "Header is too large"
 				}
 			}
 		}
 	}
-	return 0, ""
+	return 0, "", "", "", ""
 }
 
 const maxHTTPBasicCompressionBuffer = 8 << 20 // 8 MiB buffer limit
@@ -633,15 +746,56 @@ func (s *Section) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 		appSecurityMethodNotAllowed(w)
 		return
 	}
-	stats := s.Stats()
+	q := storage.HTTPSecurityAnalyticsQuery{
+		Window:    r.URL.Query().Get("window"),
+		Interval:  r.URL.Query().Get("interval"),
+		Action:    r.URL.Query().Get("action"),
+		Function:  r.URL.Query().Get("function"),
+		RuleID:    r.URL.Query().Get("rule_id"),
+		IP:        r.URL.Query().Get("ip"),
+		Path:      r.URL.Query().Get("path"),
+		Method:    r.URL.Query().Get("method"),
+		Country:   r.URL.Query().Get("country"),
+		Status:    r.URL.Query().Get("status"),
+		UserAgent: r.URL.Query().Get("user_agent"),
+		RequestID: r.URL.Query().Get("request_id"),
+		Cursor:    r.URL.Query().Get("cursor"),
+		Sort:      r.URL.Query().Get("sort"),
+	}
 	if strings.Contains(r.URL.Path, "/events/") {
+		parts := strings.Split(r.URL.Path, "/events/")
+		id := strings.Trim(parts[len(parts)-1], "/")
+		if storage.DB != nil && id != "" {
+			if event, err := storage.GetHTTPSecurityAnalyticsEvent(id); err == nil && event != nil {
+				writeJSON(w, map[string]interface{}{"event": event})
+				return
+			}
+		}
 		writeJSON(w, map[string]interface{}{"event": nil})
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/events") {
+		if storage.DB != nil {
+			if page, err := storage.GetHTTPSecurityAnalyticsEvents(q); err == nil {
+				writeJSON(w, map[string]interface{}{"events": page.Events, "total": page.Count, "next_cursor": page.NextCursor})
+				return
+			}
+		}
 		writeJSON(w, map[string]interface{}{"events": []interface{}{}, "total": 0})
 		return
 	}
+	if storage.DB != nil {
+		if dashboard, err := storage.GetHTTPSecurityAnalyticsDashboard(q); err == nil {
+			writeJSON(w, map[string]interface{}{
+				"dashboard": dashboard,
+				"summary":   dashboard.Summary,
+				"history":   dashboard.Timeseries,
+				"events":    dashboard.Events.Events,
+			})
+			return
+		}
+	}
+	stats := s.Stats()
 	writeJSON(w, map[string]interface{}{"dashboard": map[string]interface{}{"total_requests": stats.TotalRequests, "blocked_requests": stats.BlockedRequests, "allowed_requests": stats.AllowedRequests}, "history": []interface{}{}, "events": []interface{}{}})
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,14 +38,32 @@ func SetAnalyticsStore(store *analytics.Store) {
 	AnalyticsStore = store
 }
 
+func isInternalProxyPath(p string) bool {
+	return p == "/health" || p == "/health/live" || p == "/health/ready" ||
+		p == "/metrics" || p == "/.well-known/security.txt"
+}
+
 // Middleware adds request logging, ID tracking, and metrics collection.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isInternalProxyPath(r.URL.Path) || r.Header.Get("X-Aegis-Internal") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		start := time.Now()
 		var duration float64
-		reqID := uuid.New().String()
+		reqID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+		if reqID == "" {
+			reqID = strings.TrimSpace(r.Header.Get("X-Request-ID"))
+		}
+		if reqID == "" {
+			reqID = uuid.New().String()
+		}
 
-		// Inject Request ID into Context and Response Headers
+		// Inject Request ID and start timestamp into Request Headers, Context, and Response Headers
+		r.Header.Set("X-Request-Id", reqID)
+		r.Header.Set("X-Request-ID", reqID)
+		r.Header.Set("X-Aegis-Start-UnixNano", strconv.FormatInt(start.UnixNano(), 10))
 		ctx := context.WithValue(r.Context(), RequestIDKey, reqID)
 		r = r.WithContext(ctx)
 		r = WithRequestLogMetadata(r)
@@ -98,6 +117,31 @@ func Middleware(next http.Handler) http.Handler {
 		country := identity.Geo.Country
 		if detailedRequestLogging {
 			metadata := RequestLogMetadataFromRequest(r)
+			if metadata.RuleID == "" {
+				if ruleID := wrapped.Header().Get("X-Aegis-Rule-ID"); ruleID != "" {
+					metadata.RuleID = ruleID
+				}
+			}
+			if metadata.RuleName == "" {
+				if ruleName := wrapped.Header().Get("X-Aegis-Rule-Name"); ruleName != "" {
+					metadata.RuleName = ruleName
+				}
+			}
+			if metadata.RuleType == "" {
+				if ruleType := wrapped.Header().Get("X-Aegis-Rule-Type"); ruleType != "" {
+					metadata.RuleType = ruleType
+				}
+			}
+			if metadata.Action == "" {
+				if ruleAction := wrapped.Header().Get("X-Aegis-Rule-Action"); ruleAction != "" {
+					metadata.Action = ruleAction
+				}
+			}
+			wrapped.Header().Del("X-Aegis-Rule-ID")
+			wrapped.Header().Del("X-Aegis-Rule-Name")
+			wrapped.Header().Del("X-Aegis-Rule-Type")
+			wrapped.Header().Del("X-Aegis-Rule-Action")
+
 			host := metadata.Host
 			if host == "" {
 				host = r.Host
@@ -112,34 +156,56 @@ func Middleware(next http.Handler) http.Handler {
 			)
 
 			// Async Log to DB
-			storage.LogRequest(storage.RequestLog{
-				Timestamp:           time.Now().Unix(),
-				IP:                  clientIP,
-				Host:                host,
-				Path:                r.URL.Path,
-				Method:              r.Method,
-				Status:              wrapped.statusCode,
-				LatencyMs:           int64(latencyMs),
-				UserAgent:           r.UserAgent(),
-				Referer:             r.Referer(),
-				Country:             country,
-				Blocked:             wrapped.statusCode == 403,
-				RuleID:              metadata.RuleID,
-				RuleName:            metadata.RuleName,
-				RuleType:            metadata.RuleType,
-				RequestID:           reqID,
-				Upstream:            metadata.Upstream,
-				RouteName:           metadata.RouteName,
-				BytesSent:           int64(wrapped.bytesWritten),
-				ASN:                 r.Header.Get("X-Aegis-ASN"),
-				ASNOrg:              r.Header.Get("X-Aegis-ASN-Org"),
-				JA3:                 r.Header.Get("X-Aegis-TLS-JA3"),
-				JA4:                 r.Header.Get("X-Aegis-TLS-JA4"),
-				HTTPVersion:         requestHTTPVersion(r),
-				TLSVersion:          requestTLSVersion(r),
-				IPVersion:           clientIPVersion(clientIP),
-				ResponseContentType: responseContentType(wrapped),
-			})
+			if !metadata.Logged {
+				isBlocked := metadata.Blocked ||
+					wrapped.statusCode == http.StatusForbidden ||
+					wrapped.statusCode == http.StatusTooManyRequests ||
+					strings.EqualFold(metadata.Action, "block")
+				finalSection := metadata.Section
+				if finalSection == "" {
+					finalSection = "traffic"
+				}
+				finalAction := metadata.Action
+				if finalAction == "" {
+					if isBlocked {
+						finalAction = "block"
+					} else {
+						finalAction = "allow"
+					}
+				}
+				storage.LogRequest(storage.RequestLog{
+					Timestamp:           time.Now().Unix(),
+					IP:                  clientIP,
+					Host:                host,
+					Path:                r.URL.Path,
+					Method:              r.Method,
+					Status:              wrapped.statusCode,
+					LatencyMs:           int64(latencyMs),
+					UserAgent:           r.UserAgent(),
+					Referer:             r.Referer(),
+					Country:             country,
+					Blocked:             isBlocked,
+					Action:              finalAction,
+					Section:             finalSection,
+					RuleID:              metadata.RuleID,
+					RuleName:            metadata.RuleName,
+					RuleType:            metadata.RuleType,
+					Score:               metadata.Score,
+					ExtraMetadata:       metadata.ExtraMetadata,
+					RequestID:           reqID,
+					Upstream:            metadata.Upstream,
+					RouteName:           metadata.RouteName,
+					BytesSent:           int64(wrapped.bytesWritten),
+					ASN:                 r.Header.Get("X-Aegis-ASN"),
+					ASNOrg:              r.Header.Get("X-Aegis-ASN-Org"),
+					JA3:                 firstNonEmptyHeader(r, identity.TLS.JA3, "X-Aegis-TLS-JA3"),
+					JA4:                 firstNonEmptyHeader(r, identity.TLS.JA4, "X-Aegis-TLS-JA4"),
+					HTTPVersion:         requestHTTPVersion(r),
+					TLSVersion:          requestTLSVersion(r),
+					IPVersion:           clientIPVersion(clientIP),
+					ResponseContentType: responseContentType(wrapped),
+				})
+			}
 		}
 		WriteAccessLog(AccessLogEntry{
 			Timestamp: start,
@@ -156,7 +222,7 @@ func Middleware(next http.Handler) http.Handler {
 		})
 		// Simple Console Logging
 		if Logger != nil {
-			Logger.Info("Request",
+			Logger.Debug("Request",
 				zap.String("req_id", reqID),
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),
@@ -166,6 +232,16 @@ func Middleware(next http.Handler) http.Handler {
 			)
 		}
 	})
+}
+
+func firstNonEmptyHeader(r *http.Request, preferred, headerName string) string {
+	if strings.TrimSpace(preferred) != "" {
+		return strings.TrimSpace(preferred)
+	}
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Header.Get(headerName))
 }
 
 func requestHTTPVersion(r *http.Request) string {

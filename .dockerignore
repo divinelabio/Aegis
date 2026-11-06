@@ -8,7 +8,6 @@ skills-lock.json
 node_modules
 
 # Tests and local reports are source-quality assets, not image payload.
-web/admin/tests
 test-results
 playwright-report
 coverage

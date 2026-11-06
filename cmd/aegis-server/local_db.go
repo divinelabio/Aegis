@@ -84,13 +84,30 @@ func ensureLocalPostgres(logger *zap.Logger, host string, port int) {
 
 	// Poll until ready or timeout (up to 40 seconds for cold/crash-recovery starts)
 	deadline := time.Now().Add(40 * time.Second)
+	pgIsReady := filepath.Join(filepath.Dir(pgCtl), "pg_isready.exe")
+	if runtime.GOOS != "windows" {
+		pgIsReady = filepath.Join(filepath.Dir(pgCtl), "pg_isready")
+	}
+	hasIsReady := false
+	if fi, err := os.Stat(pgIsReady); err == nil && !fi.IsDir() {
+		hasIsReady = true
+	}
+
 	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
-		conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			logger.Info("Local PostgreSQL database is ready and accepting connections", zap.String("addr", addr))
-			return
+		if hasIsReady {
+			isReadyCmd := exec.Command(pgIsReady, "-h", host, "-p", strconv.Itoa(port))
+			if err := isReadyCmd.Run(); err == nil {
+				logger.Info("Local PostgreSQL database is ready and accepting connections", zap.String("addr", addr))
+				return
+			}
+		} else {
+			conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				logger.Info("Local PostgreSQL database is ready and accepting connections", zap.String("addr", addr))
+				return
+			}
 		}
 	}
 

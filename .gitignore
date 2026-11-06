@@ -7,8 +7,6 @@ node_modules/
 .codex
 skills-lock.json
 .vscode/
-graphify-out/
-.graphify*
 
 # Local environment and secrets
 .env
@@ -25,11 +23,8 @@ graphify-out/
 /aegis-server
 /aegis-updater
 /aegisctl
-aegis-linux-*
-aegisctl-linux-*
 *.exe
 bin/
-.gocache/
 .tmp/
 /dist/
 cmd/*/rsrc_windows_*.syso
@@ -67,7 +62,6 @@ playwright-report/
 *.webp
 *.gif
 !docs/images/**
-!web/admin/images/**
 
 # One-off cleanup/migration scripts and captured command output
 fix_*.js

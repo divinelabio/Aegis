@@ -1,0 +1,34 @@
+{
+  "name": "aegis-admin",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@carbon/charts": "^1.27.21",
+    "@carbon/charts-react": "^1.27.21",
+    "@carbon/icons-react": "^11.89.0",
+    "@carbon/react": "^1.117.0",
+    "@types/leaflet": "^1.9.22",
+    "jsvectormap": "^1.7.0",
+    "leaflet": "^1.9.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sass": "^1.105.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

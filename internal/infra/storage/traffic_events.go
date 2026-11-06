@@ -16,6 +16,7 @@ type TrafficEventsQuery struct {
 	Interval    string
 	Since       string
 	Until       string
+	Section     string
 	Status      string
 	StatusClass string
 	IP          string
@@ -96,6 +97,12 @@ type TrafficEventsEvent struct {
 	StatusCode          int               `json:"status_code"`
 	StatusClass         string            `json:"status_class"`
 	Action              string            `json:"action"`
+	Blocked             bool              `json:"blocked"`
+	Section             string            `json:"section,omitempty"`
+	RuleID              string            `json:"rule_id,omitempty"`
+	RuleName            string            `json:"rule_name,omitempty"`
+	RuleType            string            `json:"rule_type,omitempty"`
+	Score               int               `json:"score,omitempty"`
 	UserAgent           string            `json:"user_agent"`
 	UserAgentFamily     string            `json:"user_agent_family"`
 	LatencyMs           int64             `json:"latency_ms"`
@@ -274,7 +281,7 @@ func getTrafficEventsSummaryContext(ctx context.Context, q TrafficEventsQuery) (
 			count(DISTINCT CASE WHEN country != '' THEN country END),
 			COALESCE(sum(toInt64OrZero(JSONExtractString(metadata, 'bytes_sent'))), 0),
 			COALESCE(toUnixTimestamp(max(timestamp)), 0),
-			(SELECT count() FROM section_events WHERE section = 'traffic' AND timestamp >= ?)
+			(SELECT count() FROM section_events WHERE timestamp >= ?)
 		FROM section_events `+where, args...)
 	var total, s2, s3, s4, s5, s403, s404, s500, uniqueIPs, uniqueCountries, totalBytes uint64
 	var currentRPSCount uint64
@@ -350,6 +357,63 @@ func getTrafficEventsTimeseriesContext(ctx context.Context, q TrafficEventsQuery
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	var step time.Duration
+	switch interval {
+	case "1m":
+		step = time.Minute
+	case "5m":
+		step = 5 * time.Minute
+	case "1h":
+		step = time.Hour
+	case "1d":
+		step = 24 * time.Hour
+	default:
+		step = time.Hour
+	}
+
+	since, errSince := windowStart(defaultWindow(q.Window))
+	if errSince == nil {
+		if value := strings.TrimSpace(q.Since); value != "" {
+			if parsed, parseErr := time.Parse(time.RFC3339, value); parseErr == nil {
+				since = parsed.UTC()
+			}
+		}
+		until := time.Now().UTC()
+		if value := strings.TrimSpace(q.Until); value != "" {
+			if parsed, parseErr := time.Parse(time.RFC3339, value); parseErr == nil {
+				until = parsed.UTC()
+			}
+		}
+
+		startBucket := since.Truncate(step)
+		endBucket := until.Truncate(step)
+		out := make([]TrafficEventsTimeseriesPoint, 0)
+		for t := startBucket; !t.After(endBucket); t = t.Add(step) {
+			key := t.Unix()
+			if pt, ok := byBucket[key]; ok {
+				out = append(out, *pt)
+				delete(byBucket, key)
+			} else {
+				out = append(out, TrafficEventsTimeseriesPoint{
+					Timestamp: key,
+					Counts: map[string]int64{
+						"2xx": 0,
+						"3xx": 0,
+						"4xx": 0,
+						"5xx": 0,
+					},
+				})
+			}
+		}
+		if len(byBucket) > 0 {
+			for _, pt := range byBucket {
+				out = append(out, *pt)
+			}
+			sort.Slice(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
+		}
+		return out, nil
+	}
+
 	keys := make([]int64, 0, len(byBucket))
 	for key := range byBucket {
 		keys = append(keys, key)
@@ -449,7 +513,7 @@ func getTrafficEventsDashboardBreakdownsContext(ctx context.Context, q TrafficEv
 					'%s' AS dimension,
 					%s AS item_key,
 					%s AS item_label,
-					count() AS item_count,
+					count(*) AS item_count,
 					COALESCE(sum(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) AS error_count,
 					COALESCE(sum(CASE WHEN status_code = 403 THEN 1 ELSE 0 END), 0) AS denied_count,
 					COALESCE(toUnixTimestamp(max(timestamp)), 0) AS last_seen,
@@ -660,11 +724,14 @@ func buildTrafficEventsWhere(q TrafficEventsQuery) (string, []any, error) {
 		}
 		since = parsed.UTC()
 	}
-	clauses := []string{"section = 'traffic'", "timestamp >= ?"}
+	clauses := []string{"timestamp >= ?"}
 	args := []any{since}
 	add := func(clause string, value any) {
 		clauses = append(clauses, clause)
 		args = append(args, value)
+	}
+	if q.Section != "" {
+		add("section = ?", q.Section)
 	}
 	if q.Status != "" {
 		status, err := strconv.Atoi(strings.TrimSpace(q.Status))
@@ -849,6 +916,21 @@ func applyTrafficEventsMetadata(event *TrafficEventsEvent, raw string) {
 	}
 	if bytesSent, err := strconv.ParseInt(meta["bytes_sent"], 10, 64); err == nil {
 		event.BytesSent = bytesSent
+	}
+	event.Blocked = strings.EqualFold(event.Action, "block") ||
+		strings.EqualFold(event.Action, "deny") ||
+		strings.EqualFold(event.Action, "drop") ||
+		strings.EqualFold(event.Action, "ratelimit") ||
+		strings.EqualFold(event.Action, "rate_limit") ||
+		event.StatusCode == 403 || event.StatusCode == 429
+	event.Section = meta["section"]
+	event.RuleID = meta["rule_id"]
+	event.RuleName = meta["rule_name"]
+	event.RuleType = meta["rule_type"]
+	if scoreStr, ok := meta["score"]; ok && scoreStr != "" {
+		if s, err := strconv.Atoi(scoreStr); err == nil {
+			event.Score = s
+		}
 	}
 }
 

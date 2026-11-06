@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ type RuleEvent struct {
 	Verdict   Verdict
 	Request   RequestContext
 	Status    int
+	LatencyMs int64
 }
 
 // RuleSource supplies the ordered unified rule set used by the request engine.
@@ -130,12 +132,18 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		latencyMs := requestStartLatencyMs(r)
+		w.Header().Set("X-Aegis-Rule-ID", verdict.RuleID)
+		w.Header().Set("X-Aegis-Rule-Name", verdict.RuleName)
+		w.Header().Set("X-Aegis-Rule-Type", string(verdict.RuleType))
+		w.Header().Set("X-Aegis-Rule-Action", string(verdict.Action))
+
 		status := http.StatusOK
 		switch verdict.Action {
 		case ActionBlock:
 			status = http.StatusForbidden
 			if e.sink != nil {
-				e.sink.RecordRuleEvent(r.Context(), RuleEvent{Timestamp: time.Now().UTC(), Verdict: verdict, Request: reqCtx, Status: status})
+				e.sink.RecordRuleEvent(r.Context(), RuleEvent{Timestamp: time.Now().UTC(), Verdict: verdict, Request: reqCtx, Status: status, LatencyMs: latencyMs})
 			}
 			http.Error(w, "blocked by Aegis security rule", http.StatusForbidden)
 			return
@@ -146,17 +154,32 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 			}
 			status = http.StatusFound
 			if e.sink != nil {
-				e.sink.RecordRuleEvent(r.Context(), RuleEvent{Timestamp: time.Now().UTC(), Verdict: verdict, Request: reqCtx, Status: status})
+				e.sink.RecordRuleEvent(r.Context(), RuleEvent{Timestamp: time.Now().UTC(), Verdict: verdict, Request: reqCtx, Status: status, LatencyMs: latencyMs})
 			}
 			http.Redirect(w, r, target, http.StatusFound)
 			return
 		default:
 			if e.sink != nil {
-				e.sink.RecordRuleEvent(r.Context(), RuleEvent{Timestamp: time.Now().UTC(), Verdict: verdict, Request: reqCtx, Status: status})
+				e.sink.RecordRuleEvent(r.Context(), RuleEvent{Timestamp: time.Now().UTC(), Verdict: verdict, Request: reqCtx, Status: status, LatencyMs: latencyMs})
 			}
 			next.ServeHTTP(w, r)
 		}
 	})
+}
+
+func requestStartLatencyMs(r *http.Request) int64 {
+	if r == nil {
+		return 0
+	}
+	if raw := strings.TrimSpace(r.Header.Get("X-Aegis-Start-UnixNano")); raw != "" {
+		if ns, err := strconv.ParseInt(raw, 10, 64); err == nil && ns > 0 {
+			ms := (time.Now().UnixNano() - ns) / int64(time.Millisecond)
+			if ms > 0 {
+				return ms
+			}
+		}
+	}
+	return 0
 }
 
 func (e *Engine) currentSnapshot(ctx context.Context) (*ruleSnapshot, error) {

@@ -330,13 +330,15 @@ func setupStorageStatusSnapshot(ctx context.Context, cfg *config.Config) storage
 	}
 
 	analyticsMode := cfg.Storage.Analytics.EffectiveMode()
+	analyticsDriver := cfg.Storage.Analytics.EffectiveDriver()
 	response.Analytics = storageRuntimeStatus{
-		Driver:                string(storage.DriverClickHouse),
+		Driver:                string(analyticsDriver),
 		Configured:            analyticsMode != storage.AnalyticsModeDisabled,
 		EnvironmentLocked:     config.AnalyticsDatabaseConfigurationEnvironmentLocked(),
 		Active:                storage.DB != nil,
 		Mode:                  string(analyticsMode),
-		AnalyticsCapabilities: "telemetry, dashboards, aggregates, and retention",
+		RetentionDays:         cfg.Storage.Analytics.EffectiveRetentionDays(),
+		AnalyticsCapabilities: "telemetry, dashboards, aggregates, and 30-day retention",
 	}
 	if storage.DB != nil {
 		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)

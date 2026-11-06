@@ -11,7 +11,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/alexedwards/scs/v2"
 	"github.com/divinelabio/aegis/internal/analytics"
 	"github.com/divinelabio/aegis/internal/app"
 	"github.com/divinelabio/aegis/internal/core/admin/audit"
@@ -23,6 +22,7 @@ import (
 	"github.com/divinelabio/aegis/internal/infra/transport"
 	"github.com/divinelabio/aegis/internal/licensing"
 	"github.com/divinelabio/aegis/internal/rules"
+	"github.com/alexedwards/scs/v2"
 	"github.com/google/uuid"
 )
 
@@ -31,8 +31,8 @@ var ServerStartTime = time.Now()
 
 // Version info
 var (
-	Version   = "1.0.1"
-	BuildDate = "unknown"
+	Version   string
+	BuildDate string
 )
 
 // licenseTierStore holds the licence tier provider set by commercial overlays.
@@ -61,11 +61,6 @@ func getLicenseManager() licensing.Manager {
 		return holder.manager
 	}
 	return nil
-}
-
-// GetLicenseManager returns the manager used by the admin API and health checks.
-func GetLicenseManager() licensing.Manager {
-	return getLicenseManager()
 }
 
 // getLicenseTier returns the current license tier. Falls back to "COMMUNITY"

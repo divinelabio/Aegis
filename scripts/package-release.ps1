@@ -46,11 +46,8 @@ Get-ChildItem -Path $root -Recurse -File | ForEach-Object {
     $relativePosix = $relative.Replace('\', '/')
 
     $skip = $false
-    foreach ($prefix in $excludePrefixes) {
-        if ($relativePosix.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $skip = $true
-            break
-        }
+    if ($relativePosix -match '(?i)(^|/)(node_modules|\.git|\.agents|graphify-out|bin|\.tmp|logs|scratch|tools|data/(?:pgdata|license|tls))(/|$)') {
+        $skip = $true
     }
     if (-not $skip) {
         $filename = [System.IO.Path]::GetFileName($relative)

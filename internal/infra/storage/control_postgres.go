@@ -60,9 +60,23 @@ func InitControlDB(ctx context.Context, control ControlConfig) (*pgxpool.Pool, e
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL control database: %w", err)
 	}
-	if err := pool.Ping(connectCtx); err != nil {
+	var pingErr error
+	pingDeadline := time.Now().Add(30 * time.Second)
+	for {
+		pingCtx, pingCancel := context.WithTimeout(ctx, 3*time.Second)
+		pingErr = pool.Ping(pingCtx)
+		pingCancel()
+		if pingErr == nil {
+			break
+		}
+		if !strings.Contains(pingErr.Error(), "57P03") || time.Now().After(pingDeadline) {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if pingErr != nil {
 		pool.Close()
-		return nil, fmt.Errorf("ping PostgreSQL control database: %w", err)
+		return nil, fmt.Errorf("ping PostgreSQL control database: %w", pingErr)
 	}
 	ControlDB = pool
 	activeControlConfig = control
